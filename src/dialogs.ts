@@ -3,7 +3,7 @@ import { PublisherApi } from "./api.ts";
 import { prepareNote } from "./note.ts";
 import {
   channelFor, channelName, errorText, formatTime, issueText, kindName, localFields, states,
-  type Batch, type BatchInput, type Channel, type Preview, type Theme,
+  type Batch, type BatchInput, type Channel, type Preview, type Queue, type ScheduledEntry, type Theme,
 } from "./protocol.ts";
 
 export interface Defaults {
@@ -30,16 +30,16 @@ function labeled(parent: HTMLElement, text: string) {
   return label;
 }
 
-function confirm(app: App, message: string): Promise<boolean> {
+function confirm(app: App, message: string, deleting = false): Promise<boolean> {
   return new Promise(resolve => {
     class Confirmation extends Modal {
       confirmed = false;
       onOpen() {
-        this.setTitle("Подтверждение постановки");
+        this.setTitle(deleting ? "Удалить из отложки?" : "Подтверждение постановки");
         this.contentEl.createEl("p", { text: message });
         const controls = this.contentEl.createDiv("otp-controls");
         action(controls, "Отмена", () => this.close());
-        action(controls, "Поставить в отложку", () => {
+        action(controls, deleting ? "Удалить" : "Поставить в отложку", () => {
           this.confirmed = true;
           this.close();
         }, true);
@@ -347,18 +347,23 @@ export class StatusDialog extends Modal {
 export class QueueDialog extends Modal {
   private active = false;
   private generation = 0;
+  private timer: number | undefined;
   constructor(app: App, private readonly api: PublisherApi, private readonly defaults: Defaults) {
     super(app);
   }
 
   onOpen() {
     this.active = true;
-    this.setTitle("Нативная отложка канала");
+    this.setTitle("Викторины канала");
     this.contentEl.addClass("otp-dialog");
     void this.load();
   }
 
-  onClose() { this.active = false; this.contentEl.empty(); }
+  onClose() {
+    this.active = false;
+    window.clearTimeout(this.timer);
+    this.contentEl.empty();
+  }
 
   private async load() {
     const panel = this.contentEl.createDiv();
@@ -372,23 +377,32 @@ export class QueueDialog extends Modal {
       for (const channel of channels) select.createEl("option", { value: String(channel.id), text: channelName(channel) });
       const preferred = channelFor(channels, this.defaults.channel);
       if (preferred) select.value = String(preferred.id);
-      const refresh = async () => {
+      const tabs = controls.createEl("select", { attr: { "aria-label": "Раздел" } });
+      tabs.createEl("option", { value: "scheduled", text: "В отложке" });
+      tabs.createEl("option", { value: "published", text: "Опубликованы" });
+      const refresh = async (sync = false) => {
+        window.clearTimeout(this.timer);
         const generation = ++this.generation;
         const current = () => this.active && this.generation === generation;
+        const channel = Number(select.value);
         panel.empty();
-        panel.createEl("p", { text: "Читаю отложку…" });
+        panel.createEl("p", { text: "Читаю данные Telegram…" });
         try {
-          const queue = await this.api.queue(Number(select.value));
+          if (sync) await this.api.refreshQueue(channel);
+          const queue = await this.api.queue(channel);
           if (!current()) return;
           panel.empty();
           const time = (value: string) => formatTime(value, this.defaults.timezone);
           panel.createEl("p", { cls: "otp-muted", text: `Снимок Telegram от ${time(queue.checked_at)} · ${this.defaults.timezone}` });
-          if (!queue.messages.length) panel.createEl("p", { text: "Отложенных сообщений нет." });
-          for (const item of queue.messages) {
-            const card = panel.createDiv("otp-card");
-            card.createEl("strong", { text: `${time(item.scheduled_at)} · ${kindName(item.kind)}` });
-            if (item.text) card.createDiv({ text: item.text });
-            card.createDiv({ text: `ID ${item.id}`, cls: "otp-muted" });
+          const waiting = queue.refresh_requested || queue.messages.some(item => item.delete_requested);
+          if (waiting) {
+            panel.createEl("p", { text: "Жду подтверждения от Telegram…" });
+            this.timer = window.setTimeout(() => void refresh(), 2500);
+          }
+          if (tabs.value === "published") {
+            this.showPublished(panel, queue, time);
+          } else {
+            this.showScheduled(panel, queue, time, channel, current, () => refresh());
           }
         } catch (error) {
           if (!current()) return;
@@ -396,11 +410,65 @@ export class QueueDialog extends Modal {
           failure(panel, error);
         }
       };
-      action(controls, "Обновить", refresh);
+      action(controls, "Сверить с Telegram", () => refresh(true));
       select.addEventListener("change", () => void refresh());
+      tabs.addEventListener("change", () => void refresh());
       await refresh();
     } catch (error) {
       if (this.active) failure(panel, error);
     }
   }
+
+  private showPublished(panel: HTMLElement, queue: Queue, time: (value: string) => string) {
+    if (queue.published === undefined) {
+      panel.createEl("p", { text: "Для списка публикаций требуется обновить сервер." });
+      return;
+    }
+    panel.createEl("p", { cls: "otp-muted", text: "Викторины среди 100 последних сообщений канала." });
+    if (!queue.published.length) panel.createEl("p", { text: "Недавних опубликованных викторин нет." });
+    for (const item of queue.published) {
+      const card = panel.createDiv("otp-card");
+      card.createEl("strong", { text: item.text ?? "Викторина" });
+      card.createDiv({ text: `${time(item.scheduled_at)} · ID ${item.id}`, cls: "otp-muted" });
+    }
+  }
+
+  private showScheduled(
+    panel: HTMLElement, queue: Queue, time: (value: string) => string, channel: number,
+    current: () => boolean, refresh: () => Promise<void>,
+  ) {
+    const groups = new Map<string, ScheduledEntry[]>();
+    for (const item of [...queue.messages].sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at))) {
+      const key = item.batch_id ? `${item.batch_id}:${item.position}` : String(item.id);
+      const group = groups.get(key) ?? [];
+      group.push(item);
+      groups.set(key, group);
+    }
+    if (!groups.size) panel.createEl("p", { text: "Отложенных сообщений нет." });
+    for (const items of groups.values()) {
+      const task = items.find(item => item.kind === "poll") ?? items[0];
+      const card = panel.createDiv("otp-card");
+      card.createEl("strong", { text: task.text || kindName(task.kind) });
+      for (const item of items) {
+        card.createDiv({ text: `${time(item.scheduled_at)} · ${kindName(item.kind)} · ID ${item.id}`, cls: "otp-muted" });
+        if (item.error) failure(card, new Error(item.error));
+      }
+      if (!task.managed_id) continue;
+      const managedId = task.managed_id;
+      const remove = action(card.createDiv("otp-controls"), "Удалить задание из отложки", async () => {
+        if (!await confirm(this.app, `Из отложки этого канала будут удалены сообщения задания «${task.text ?? "Викторина"}», включая картинку, если она ещё в очереди.`, true) || !current()) return;
+        remove.disabled = true;
+        try {
+          await this.api.removeTask(channel, managedId);
+          if (current()) await refresh();
+        } catch (error) {
+          if (current()) failure(card, error);
+        } finally {
+          remove.disabled = false;
+        }
+      });
+      remove.disabled = items.some(item => item.delete_requested);
+    }
+  }
+
 }

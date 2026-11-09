@@ -54,6 +54,10 @@ export class PublisherApi {
   messages(id: string) { return this.json<BatchMessage[]>(`/batches/${encodeURIComponent(id)}/messages`); }
   reconcile(id: string) { return this.json<Batch>(`/batches/${encodeURIComponent(id)}/reconcile`, {}); }
   queue(id: number) { return this.json<Queue>(`/scheduled?channel_id=${id}`); }
+  refreshQueue(id: number) { return this.json<{ queued: boolean }>(`/scheduled/${id}/refresh`, {}); }
+  removeTask(channel: number, id: string) {
+    return this.json<{ queued: boolean }>(`/scheduled/${channel}/delete/${encodeURIComponent(id)}`, {});
+  }
 
   async upload(data: ArrayBuffer, extension: string): Promise<string> {
     const options = multipartImage(data, extension);

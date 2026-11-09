@@ -23,8 +23,14 @@ export interface BatchMessage {
   id: string; task_id: string; kind: string; status: string; scheduled_at: string;
   telegram_scheduled_id: number | null; attempt_count: number; last_error: string | null;
 }
+export interface QueueEntry { id: number; kind: string; text: string | null; scheduled_at: string }
+export interface ScheduledEntry extends QueueEntry {
+  managed_id?: string | null; batch_id?: string | null; position?: number | null;
+  delete_requested?: boolean; error?: string | null;
+}
 export interface Queue {
-  checked_at: string; messages: { id: number; kind: string; text: string | null; scheduled_at: string }[];
+  checked_at: string; messages: ScheduledEntry[];
+  published?: QueueEntry[]; refresh_requested?: boolean;
 }
 
 export function backendUrl(value: string): string {
@@ -106,7 +112,8 @@ export const states: Record<string, string> = {
   draft: "Черновик", queued: "В очереди", pending: "Ожидает", ready: "Готово к отправке",
   processing: "Обрабатывается", rendering: "Готовится изображение", scheduling: "Отправляется",
   verifying: "Проверяется в Telegram", scheduled: "Подтверждено в отложке",
-  partial: "Проверка завершилась с проблемами", blocked: "Остановлено", uncertain: "Требуется сверка",
+  removed: "Удалено из отложки", published: "Опубликовано",
+  partial: "Часть сообщений в другом состоянии", blocked: "Остановлено", uncertain: "Требуется сверка",
   retryable_error: "Ожидает повторной попытки",
 };
 
