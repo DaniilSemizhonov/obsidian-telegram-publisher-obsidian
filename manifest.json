@@ -1,0 +1,9 @@
+{
+  "id": "obsidian-telegram-publisher",
+  "name": "Telegram Publisher",
+  "version": "0.1.0",
+  "minAppVersion": "1.11.4",
+  "description": "Проверка, предпросмотр и отправка викторин в нативную отложку Telegram.",
+  "author": "DaniilSemizhonov",
+  "isDesktopOnly": true
+}

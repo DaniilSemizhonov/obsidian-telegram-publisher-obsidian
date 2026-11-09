@@ -1,0 +1,52 @@
+.otp-dialog .otp-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: var(--size-4-3);
+}
+.otp-dialog .otp-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-1);
+  min-width: 0;
+}
+.otp-dialog .otp-field input,
+.otp-dialog .otp-field select {
+  width: 100%;
+}
+.otp-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--size-4-2);
+  margin-block: var(--size-4-3);
+}
+.otp-dialog .otp-card {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  padding: var(--size-4-3);
+  margin-block: var(--size-4-2);
+  overflow-wrap: anywhere;
+}
+.otp-dialog .otp-card h4 {
+  margin-block: 0 var(--size-4-2);
+}
+.otp-dialog .otp-image img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin-block: var(--size-4-2);
+}
+.otp-dialog .otp-card pre {
+  white-space: pre-wrap;
+}
+.otp-dialog .otp-muted {
+  color: var(--text-muted);
+}
+.otp-dialog .otp-error {
+  color: var(--text-error);
+  white-space: pre-wrap;
+}
+.otp-dialog .otp-correct {
+  color: var(--text-success);
+  font-weight: var(--font-semibold);
+}
