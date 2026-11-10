@@ -1,10 +1,12 @@
-export type Theme = "sand" | "dark" | "light";
+export const themeNames = { sand: "Песочная", dark: "Тёмная", light: "Светлая", coral: "Коралловая" };
+export type Theme = keyof typeof themeNames;
 export interface Channel { id: number; title: string; username: string | null }
 export interface Task {
   external_id: string; title: string; question: string; options: string[];
   correct_index: number; explanation: string; image: string | null;
   code: { source: string; language: string } | null;
 }
+export type PollRevision = Pick<Task, "question" | "options" | "correct_index" | "explanation">;
 export interface Issue { task?: number | null; field?: string; message: string }
 export interface Parsed {
   telegram: Record<string, unknown>; tasks: Task[]; errors: Issue[]; warnings: Issue[];
@@ -30,7 +32,7 @@ export interface ScheduledEntry extends QueueEntry {
 }
 export interface Queue {
   checked_at: string; messages: ScheduledEntry[];
-  published?: QueueEntry[]; refresh_requested?: boolean;
+  published?: QueueEntry[]; refresh_requested?: boolean; replacing?: boolean;
 }
 
 export function backendUrl(value: string): string {

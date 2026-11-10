@@ -2,8 +2,8 @@ import { Modal, Notice, type App, type TFile } from "obsidian";
 import { PublisherApi } from "./api.ts";
 import { prepareNote } from "./note.ts";
 import {
-  channelFor, channelName, errorText, formatTime, issueText, kindName, localFields, states,
-  type Batch, type BatchInput, type Channel, type Preview, type Queue, type ScheduledEntry, type Theme,
+  channelFor, channelName, errorText, formatTime, issueText, kindName, localFields, states, themeNames,
+  type Batch, type BatchInput, type Channel, type PollRevision, type Preview, type Queue, type ScheduledEntry, type Theme,
 } from "./protocol.ts";
 
 export interface Defaults {
@@ -145,7 +145,7 @@ export class PlanningDialog extends Modal {
       type: "number", value: String(meta.quiz_delay ?? this.defaults.delay), attr: { min: "1", step: "1" },
     });
     const theme = labeled(form, "Тема PNG").createEl("select");
-    for (const [value, text] of [["sand", "Песочная"], ["dark", "Тёмная"], ["light", "Светлая"]]) {
+    for (const [value, text] of Object.entries(themeNames)) {
       theme.createEl("option", { value, text });
     }
     theme.value = typeof meta.theme === "string" ? meta.theme : this.defaults.theme;
@@ -394,7 +394,7 @@ export class QueueDialog extends Modal {
           panel.empty();
           const time = (value: string) => formatTime(value, this.defaults.timezone);
           panel.createEl("p", { cls: "otp-muted", text: `Снимок Telegram от ${time(queue.checked_at)} · ${this.defaults.timezone}` });
-          const waiting = queue.refresh_requested || queue.messages.some(item => item.delete_requested);
+          const waiting = queue.refresh_requested || queue.replacing || queue.messages.some(item => item.delete_requested);
           if (waiting) {
             panel.createEl("p", { text: "Жду подтверждения от Telegram…" });
             this.timer = window.setTimeout(() => void refresh(), 2500);
@@ -455,7 +455,25 @@ export class QueueDialog extends Modal {
       }
       if (!task.managed_id) continue;
       const managedId = task.managed_id;
-      const remove = action(card.createDiv("otp-controls"), "Удалить задание из отложки", async () => {
+      const controls = card.createDiv("otp-controls");
+      if (task.kind === "poll" && task.batch_id && task.position != null && queue.replacing !== undefined) {
+        const edit = action(controls, "Изменить викторину", async () => {
+          const batchId = task.batch_id;
+          const position = task.position;
+          if (!batchId || position == null) return;
+          edit.disabled = true;
+          try {
+            const batch = await this.api.batch(batchId);
+            if (current()) this.editPoll(channel, managedId, task, batch.payload.tasks[position], time, refresh);
+          } catch (error) {
+            if (current()) failure(card, error);
+          } finally {
+            edit.disabled = false;
+          }
+        });
+        edit.disabled = items.some(item => item.delete_requested);
+      }
+      const remove = action(controls, "Удалить задание из отложки", async () => {
         if (!await confirm(this.app, `Из отложки этого канала будут удалены сообщения задания «${task.text ?? "Викторина"}», включая картинку, если она ещё в очереди.`, true) || !current()) return;
         remove.disabled = true;
         try {
@@ -469,6 +487,54 @@ export class QueueDialog extends Modal {
       });
       remove.disabled = items.some(item => item.delete_requested);
     }
+  }
+
+  private editPoll(
+    channel: number, managedId: string, message: ScheduledEntry, task: PollRevision,
+    time: (value: string) => string, refresh: () => Promise<void>,
+  ) {
+    const api = this.api;
+    const queue = this;
+    class PollEditor extends Modal {
+      onOpen() {
+        this.setTitle("Изменить отложенную викторину");
+        const body = this.contentEl;
+        body.addClass("otp-dialog");
+        body.createEl("p", { text: `Старый опрос будет удалён, новый запланирован на ${time(message.scheduled_at)}. Картинка останется в расписании. Исходная заметка не изменится.` });
+        const question = labeled(body, "Вопрос").createEl("textarea", { attr: { maxlength: "255", rows: "2" } });
+        question.value = task.question;
+        const options = labeled(body, "Варианты · по одному на строку").createEl("textarea", { attr: { rows: "5" } });
+        options.value = task.options.join("\n");
+        const correct = labeled(body, "Номер правильного варианта, начиная с 1").createEl("input", { type: "number", attr: { min: "1" } });
+        correct.value = String(task.correct_index + 1);
+        const explanation = labeled(body, "Пояснение").createEl("textarea", { attr: { maxlength: "200", rows: "3" } });
+        explanation.value = task.explanation;
+        const errors = body.createDiv();
+        const button = action(body.createDiv("otp-controls"), "Подтвердить замену", async () => {
+          button.disabled = true;
+          errors.empty();
+          try {
+            const answers = options.value.split(/\r?\n/).map(option => option.trim()).filter(Boolean);
+            const index = correct.valueAsNumber - 1;
+            if (!Number.isInteger(index) || index < 0 || index >= answers.length) {
+              throw new Error("Укажите номер правильного варианта.");
+            }
+            await api.replacePoll(channel, managedId, message.id, {
+              question: question.value.trim(), options: answers, correct_index: index,
+              explanation: explanation.value.trim(),
+            });
+            this.close();
+            if (queue.active) await refresh();
+          } catch (error) {
+            failure(errors, error);
+          } finally {
+            button.disabled = false;
+          }
+        }, true);
+      }
+      onClose() { this.contentEl.empty(); }
+    }
+    new PollEditor(this.app).open();
   }
 
 }

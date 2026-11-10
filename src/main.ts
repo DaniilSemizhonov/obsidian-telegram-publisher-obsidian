@@ -1,7 +1,7 @@
 import { Notice, Plugin, PluginSettingTab, Setting, TFile } from "obsidian";
 import { PublisherApi } from "./api.ts";
 import { PlanningDialog, QueueDialog, StatusDialog, type Defaults, type SavedBatch } from "./dialogs.ts";
-import { backendUrl, errorText, localFields, type Batch } from "./protocol.ts";
+import { backendUrl, errorText, localFields, themeNames, type Batch } from "./protocol.ts";
 
 const SECRET_ID = "obsidian-telegram-publisher-api";
 const DEFAULTS: Settings = {
@@ -158,7 +158,7 @@ class PublisherSettings extends PluginSettingTab {
       });
     }
     new Setting(root).setName("Тема PNG").addDropdown(dropdown => dropdown
-      .addOptions({ sand: "Песочная", dark: "Тёмная", light: "Светлая" })
+      .addOptions(themeNames)
       .setValue(settings.theme).onChange(value => { settings.theme = value as Settings["theme"]; persist(); }));
     new Setting(root).setName("Изображения в предпросмотре")
       .addToggle(toggle => toggle.setValue(settings.images).onChange(value => { settings.images = value; persist(); }));
