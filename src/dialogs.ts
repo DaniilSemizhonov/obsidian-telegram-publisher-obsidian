@@ -10,7 +10,6 @@ export interface Defaults {
   channel: string; timezone: string; interval: number; delay: number; theme: Theme; images: boolean;
 }
 export interface SavedBatch { id: string; path: string; server: string }
-type Mode = "validate" | "preview" | "schedule";
 
 function action(parent: HTMLElement, text: string, callback: () => void | Promise<void>, primary = false) {
   const button = parent.createEl("button", { text, cls: primary ? "mod-cta" : undefined });
@@ -58,7 +57,7 @@ export class PlanningDialog extends Modal {
 
   constructor(
     app: App, private readonly file: TFile, private readonly api: PublisherApi,
-    defaults: Defaults, private readonly mode: Mode,
+    defaults: Defaults,
     remember: (batch: Batch) => Promise<void>,
   ) {
     super(app);
@@ -68,8 +67,7 @@ export class PlanningDialog extends Modal {
 
   onOpen() {
     this.active = true;
-    this.setTitle(this.mode === "validate" ? "Проверка викторин" :
-      this.mode === "preview" ? "Предпросмотр викторин" : "Запланировать подборку");
+    this.setTitle("Запланировать подборку");
     this.contentEl.addClass("otp-dialog");
     void this.load();
   }
@@ -159,7 +157,7 @@ export class PlanningDialog extends Modal {
       }
     });
 
-    const previewButton = action(controls, this.mode === "validate" ? "Проверить" : "Обновить предпросмотр", async () => {
+    const previewButton = action(controls, "Обновить предпросмотр", async () => {
       if (busy) return;
       result.empty();
       this.releaseImages();
@@ -180,7 +178,7 @@ export class PlanningDialog extends Modal {
       inputs.forEach(input => { input.disabled = true; });
       const loading = result.createEl("p", { text: "Проверяю расписание…" });
       try {
-        const preview = await this.api.preview(batch, this.defaults.images, this.mode === "validate");
+        const preview = await this.api.preview(batch, this.defaults.images);
         if (!this.active) return;
         loading.remove();
         await this.showPreview(result, target, batch, preview, markdown);
@@ -209,7 +207,7 @@ export class PlanningDialog extends Modal {
       const messages = preview.messages.filter(message => message.position === position);
       for (const message of messages) {
         card.createDiv({ cls: "otp-muted", text: `${time(message.scheduled_at)} · ${kindName(message.kind)}` });
-        if (message.image_url && this.mode !== "validate") {
+        if (message.image_url) {
           imageJobs.push({ path: message.image_url, target: card.createDiv("otp-image") });
         }
       }
@@ -231,7 +229,6 @@ export class PlanningDialog extends Modal {
       this.images.push(src);
       target.createEl("img", { attr: { src, alt: "Изображение задания" } });
     }
-    if (this.mode === "validate") return;
     const controls = parent.createDiv("otp-controls");
     const errors = parent.createDiv();
     const send = action(controls, "Поставить в отложку", async () => {

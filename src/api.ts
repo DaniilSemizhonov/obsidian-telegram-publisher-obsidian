@@ -44,9 +44,8 @@ export class PublisherApi {
   parse(markdown: string, attachments: Record<string, string>) {
     return this.json<Parsed>("/notes/parse", { markdown, attachments });
   }
-  preview(batch: BatchInput, images: boolean, validateOnly: boolean) {
-    const path = validateOnly ? "/batches/validate" : `/batches/preview?preview_images=${images}`;
-    return this.json<Preview>(path, batch);
+  preview(batch: BatchInput, images: boolean) {
+    return this.json<Preview>(`/batches/preview?preview_images=${images}`, batch);
   }
   create(batch: BatchInput) { return this.json<Batch>("/batches", batch); }
   schedule(id: string) { return this.json<Batch>(`/batches/${encodeURIComponent(id)}/schedule`, {}); }

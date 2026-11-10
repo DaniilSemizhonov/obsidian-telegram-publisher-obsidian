@@ -20,10 +20,8 @@ export default class TelegramPublisher extends Plugin {
     const saved = await this.loadData() as Partial<PluginData> | null;
     this.data = { settings: { ...DEFAULTS, ...saved?.settings }, batches: saved?.batches ?? [] };
     this.addSettingTab(new PublisherSettings(this));
-    this.addRibbonIcon("calendar-clock", "Запланировать подборку в Telegram", () => this.plan("schedule"));
-    this.addCommand({ id: "validate-note", name: "Telegram: Проверить текущую заметку", callback: () => this.plan("validate") });
-    this.addCommand({ id: "preview-note", name: "Telegram: Предпросмотр викторин", callback: () => this.plan("preview") });
-    this.addCommand({ id: "schedule-note", name: "Telegram: Запланировать подборку", callback: () => this.plan("schedule") });
+    this.addRibbonIcon("calendar-clock", "Запланировать подборку в Telegram", () => this.plan());
+    this.addCommand({ id: "schedule-note", name: "Telegram: Запланировать подборку", callback: () => this.plan() });
     this.addCommand({ id: "batch-status", name: "Telegram: Проверить статус публикаций", callback: () => this.status() });
     this.addCommand({ id: "channel-queue", name: "Telegram: Открыть отложку канала", callback: () => this.queue() });
   }
@@ -44,7 +42,7 @@ export default class TelegramPublisher extends Plugin {
     await this.persist();
   }
 
-  private plan(mode: "validate" | "preview" | "schedule") {
+  private plan() {
     const file = this.app.workspace.getActiveFile();
     if (!(file instanceof TFile) || file.extension !== "md") {
       new Notice("Откройте Markdown-заметку с викторинами.");
@@ -52,7 +50,7 @@ export default class TelegramPublisher extends Plugin {
     }
     try {
       const api = this.api();
-      new PlanningDialog(this.app, file, api, this.data.settings, mode,
+      new PlanningDialog(this.app, file, api, this.data.settings,
         batch => this.remember(batch, api.base)).open();
     } catch (error) {
       new Notice(errorText(error));
