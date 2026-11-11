@@ -1,6 +1,6 @@
 import { Notice, Plugin, PluginSettingTab, Setting, TFile } from "obsidian";
 import { PublisherApi } from "./api.ts";
-import { PlanningDialog, QueueDialog, StatusDialog, type Defaults, type SavedBatch } from "./dialogs.ts";
+import { PlanningDialog, QueueView, QUEUE_VIEW, StatusDialog, type Defaults, type SavedBatch } from "./dialogs.ts";
 import { backendUrl, errorText, localFields, themeNames, type Batch } from "./protocol.ts";
 
 const SECRET_ID = "obsidian-telegram-publisher-api";
@@ -20,7 +20,8 @@ export default class TelegramPublisher extends Plugin {
     const saved = await this.loadData() as Partial<PluginData> | null;
     this.data = { settings: { ...DEFAULTS, ...saved?.settings }, batches: saved?.batches ?? [] };
     this.addSettingTab(new PublisherSettings(this));
-    this.addRibbonIcon("calendar-clock", "Запланировать подборку в Telegram", () => this.plan());
+    this.registerView(QUEUE_VIEW, leaf => new QueueView(leaf, () => this.api(), this.data.settings, () => this.plan()));
+    this.addRibbonIcon("calendar-clock", "Отложка Telegram", () => void this.queue());
     this.addCommand({ id: "schedule-note", name: "Telegram: Запланировать подборку", callback: () => this.plan() });
     this.addCommand({ id: "batch-status", name: "Telegram: Проверить статус публикаций", callback: () => this.status() });
     this.addCommand({ id: "channel-queue", name: "Telegram: Открыть отложку канала", callback: () => this.queue() });
@@ -73,8 +74,10 @@ export default class TelegramPublisher extends Plugin {
     }
   }
 
-  private queue() {
-    try { new QueueDialog(this.app, this.api(), this.data.settings).open(); }
+  private async queue() {
+    try {
+      await this.app.workspace.ensureSideLeaf(QUEUE_VIEW, "right", { active: true });
+    }
     catch (error) { new Notice(errorText(error)); }
   }
 }

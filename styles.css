@@ -10,8 +10,18 @@
   min-width: 0;
 }
 .otp-dialog .otp-field input,
-.otp-dialog .otp-field select {
+.otp-dialog .otp-field select,
+.otp-dialog .otp-field textarea {
   width: 100%;
+}
+.otp-dialog .otp-field textarea {
+  resize: vertical;
+}
+.otp-queue select {
+  max-width: 100%;
+}
+.otp-queue .otp-post-text {
+  white-space: pre-wrap;
 }
 .otp-controls {
   display: flex;

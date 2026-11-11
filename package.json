@@ -1,7 +1,7 @@
 {
   "name": "obsidian-telegram-publisher",
-  "version": "0.3.1",
-  "description": "Публикация викторин из Obsidian в отложку Telegram",
+  "version": "0.4.0",
+  "description": "Управление отложкой Telegram из Obsidian",
   "scripts": {
     "test": "node --test tests/*.test.ts",
     "check": "tsc --noEmit",

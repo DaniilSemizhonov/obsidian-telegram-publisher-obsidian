@@ -1,4 +1,4 @@
-import { Modal, Notice, type App, type TFile } from "obsidian";
+import { ItemView, Modal, Notice, type App, type TFile, type WorkspaceLeaf } from "obsidian";
 import { PublisherApi } from "./api.ts";
 import { prepareNote } from "./note.ts";
 import {
@@ -341,32 +341,46 @@ export class StatusDialog extends Modal {
   }
 }
 
-export class QueueDialog extends Modal {
+export const QUEUE_VIEW = "telegram-publisher-queue";
+
+export class QueueView extends ItemView {
   private active = false;
   private generation = 0;
   private timer: number | undefined;
-  constructor(app: App, private readonly api: PublisherApi, private readonly defaults: Defaults) {
-    super(app);
+  private api!: PublisherApi;
+  constructor(
+    leaf: WorkspaceLeaf, private readonly connect: () => PublisherApi,
+    private readonly defaults: Defaults, private readonly planNote: () => void,
+  ) {
+    super(leaf);
   }
 
-  onOpen() {
+  getViewType() { return QUEUE_VIEW; }
+  getDisplayText() { return "Отложка Telegram"; }
+  getIcon() { return "calendar-clock"; }
+
+  async onOpen() {
     this.active = true;
-    this.setTitle("Викторины канала");
-    this.contentEl.addClass("otp-dialog");
-    void this.load();
+    this.contentEl.addClass("otp-dialog", "otp-queue");
+    void this.loadQueue();
   }
 
-  onClose() {
+  async onClose() {
     this.active = false;
+    this.generation++;
     window.clearTimeout(this.timer);
     this.contentEl.empty();
   }
 
-  private async load() {
+  private async loadQueue() {
+    this.contentEl.empty();
     const panel = this.contentEl.createDiv();
+    panel.setText("Подключаюсь к серверу…");
+    const generation = ++this.generation;
     try {
+      this.api = this.connect();
       const channels = await this.api.channels();
-      if (!this.active) return;
+      if (!this.active || this.generation !== generation) return;
       if (!channels.length) throw new Error("Сервер пока не подтвердил ни одного доступного канала.");
       const controls = this.contentEl.createDiv("otp-controls");
       this.contentEl.insertBefore(controls, panel);
@@ -377,29 +391,49 @@ export class QueueDialog extends Modal {
       const tabs = controls.createEl("select", { attr: { "aria-label": "Раздел" } });
       tabs.createEl("option", { value: "scheduled", text: "В отложке" });
       tabs.createEl("option", { value: "published", text: "Опубликованы" });
-      const refresh = async (sync = false) => {
+      const compose = this.contentEl.createDiv("otp-controls");
+      this.contentEl.insertBefore(compose, panel);
+      const newPost = action(compose, "Новый пост", () => {
+        const channel = channelFor(channels, select.value);
+        if (!channel) return;
+        this.composePost(channel, async () => {
+          if (!this.active || select.value !== String(channel.id)) return;
+          tabs.value = "scheduled";
+          await refresh();
+        });
+      }, true);
+      newPost.disabled = true;
+      action(compose, "Викторины из заметки", this.planNote);
+      const refresh = async (sync = false, background = false) => {
         window.clearTimeout(this.timer);
         const generation = ++this.generation;
         const current = () => this.active && this.generation === generation;
         const channel = Number(select.value);
-        panel.empty();
-        panel.createEl("p", { text: "Читаю данные Telegram…" });
+        const selected = () => this.active && select.isConnected && Number(select.value) === channel;
+        if (!background) {
+          panel.empty();
+          panel.createEl("p", { text: "Читаю данные Telegram…" });
+        }
         try {
           if (sync) await this.api.refreshQueue(channel);
           const queue = await this.api.queue(channel);
           if (!current()) return;
           panel.empty();
+          newPost.disabled = queue.post_submissions === undefined;
+          if (newPost.disabled) newPost.title = "Для текстовых постов нужен обновлённый сервер.";
+          else newPost.removeAttribute("title");
           const time = (value: string) => formatTime(value, this.defaults.timezone);
           panel.createEl("p", { cls: "otp-muted", text: `Снимок Telegram от ${time(queue.checked_at)} · ${this.defaults.timezone}` });
-          const waiting = queue.refresh_requested || queue.replacing || queue.messages.some(item => item.delete_requested);
+          const waiting = queue.refresh_requested || queue.replacing || queue.messages.some(item => item.delete_requested)
+            || queue.post_submissions?.some(item => item.status !== "blocked" && item.status !== "uncertain");
           if (waiting) {
             panel.createEl("p", { text: "Жду подтверждения от Telegram…" });
-            this.timer = window.setTimeout(() => void refresh(), 2500);
+            this.timer = window.setTimeout(() => void refresh(false, true), 2500);
           }
           if (tabs.value === "published") {
             this.showPublished(panel, queue, time);
           } else {
-            this.showScheduled(panel, queue, time, channel, current, () => refresh());
+            this.showScheduled(panel, queue, time, channel, selected, () => refresh());
           }
         } catch (error) {
           if (!current()) return;
@@ -412,8 +446,52 @@ export class QueueDialog extends Modal {
       tabs.addEventListener("change", () => void refresh());
       await refresh();
     } catch (error) {
-      if (this.active) failure(panel, error);
+      if (!this.active || this.generation !== generation) return;
+      panel.empty();
+      failure(panel, error);
+      action(panel, "Подключиться снова", () => this.loadQueue());
     }
+  }
+
+  private composePost(channel: Channel, refresh: () => Promise<void>) {
+    const api = this.api;
+    const timezone = this.defaults.timezone;
+    class PostEditor extends Modal {
+      onOpen() {
+        this.setTitle("Новый пост");
+        const body = this.contentEl;
+        body.addClass("otp-dialog");
+        body.createEl("p", { text: `${channelName(channel)} · ${timezone}`, cls: "otp-muted" });
+        const text = labeled(body, "Текст поста").createEl("textarea", { attr: { rows: "7", maxlength: "4096" } });
+        const fields = body.createDiv("otp-fields");
+        const date = labeled(fields, "Дата").createEl("input", { type: "date" });
+        const start = labeled(fields, "Время").createEl("input", { type: "time" });
+        const initial = localFields(timezone);
+        date.value = initial.date;
+        start.value = initial.start;
+        const errors = body.createDiv();
+        const submit = action(body.createDiv("otp-controls"), "Поставить в отложку", async () => {
+          errors.empty();
+          if (!text.value.trim() || !date.value || !start.value) {
+            failure(errors, new Error("Введите текст, дату и время публикации."));
+            return;
+          }
+          submit.disabled = true;
+          try {
+            await api.schedulePost({ channel_id: channel.id, timezone, date: date.value, start: start.value, text: text.value.trim() });
+            this.close();
+            await refresh();
+          } catch (error) {
+            failure(errors, error);
+          } finally {
+            submit.disabled = false;
+          }
+        }, true);
+        text.focus();
+      }
+      onClose() { this.contentEl.empty(); }
+    }
+    new PostEditor(this.app).open();
   }
 
   private showPublished(panel: HTMLElement, queue: Queue, time: (value: string) => string) {
@@ -441,11 +519,18 @@ export class QueueDialog extends Modal {
       group.push(item);
       groups.set(key, group);
     }
-    if (!groups.size) panel.createEl("p", { text: "Отложенных сообщений нет." });
+    const submissions = queue.post_submissions ?? [];
+    if (!groups.size && !submissions.length) panel.createEl("p", { text: "Отложенных сообщений нет." });
+    for (const post of submissions) {
+      const card = panel.createDiv("otp-card");
+      card.createDiv({ text: post.text, cls: "otp-post-text" });
+      card.createDiv({ text: `${time(post.scheduled_at)} · ${states[post.status] ?? post.status}`, cls: "otp-muted" });
+      if (post.error) failure(card, new Error(post.error));
+    }
     for (const items of groups.values()) {
       const task = items.find(item => item.kind === "poll") ?? items[0];
       const card = panel.createDiv("otp-card");
-      card.createEl("strong", { text: task.text || kindName(task.kind) });
+      card.createDiv({ text: task.text || kindName(task.kind), cls: "otp-post-text" });
       for (const item of items) {
         card.createDiv({ text: `${time(item.scheduled_at)} · ${kindName(item.kind)} · ID ${item.id}`, cls: "otp-muted" });
         if (item.error) failure(card, new Error(item.error));
@@ -470,8 +555,11 @@ export class QueueDialog extends Modal {
         });
         edit.disabled = items.some(item => item.delete_requested);
       }
-      const remove = action(controls, "Удалить задание из отложки", async () => {
-        if (!await confirm(this.app, `Из отложки этого канала будут удалены сообщения задания «${task.text ?? "Викторина"}», включая картинку, если она ещё в очереди.`, true) || !current()) return;
+      const remove = action(controls, "Удалить из отложки", async () => {
+        const prompt = task.kind === "text"
+          ? "Удалить этот пост из отложки канала?"
+          : "Удалить сообщения задания из отложки канала вместе с отложенной картинкой?";
+        if (!await confirm(this.app, prompt, true) || !current()) return;
         remove.disabled = true;
         try {
           await this.api.removeTask(channel, managedId);

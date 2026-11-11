@@ -1,7 +1,7 @@
 import { requestUrl, type RequestUrlParam, type RequestUrlResponse } from "obsidian";
 import {
   backendUrl, issueText, multipartImage, type Batch, type BatchInput, type BatchMessage,
-  type Channel, type Issue, type Parsed, type PollRevision, type Preview, type Queue,
+  type Channel, type Issue, type Parsed, type PollRevision, type PostInput, type Preview, type Queue,
 } from "./protocol.ts";
 
 export class PublisherApi {
@@ -53,6 +53,7 @@ export class PublisherApi {
   messages(id: string) { return this.json<BatchMessage[]>(`/batches/${encodeURIComponent(id)}/messages`); }
   reconcile(id: string) { return this.json<Batch>(`/batches/${encodeURIComponent(id)}/reconcile`, {}); }
   queue(id: number) { return this.json<Queue>(`/scheduled?channel_id=${id}`); }
+  schedulePost(post: PostInput) { return this.json<{ id: string; status: string }>("/posts", post); }
   refreshQueue(id: number) { return this.json<{ queued: boolean }>(`/scheduled/${id}/refresh`, {}); }
   replacePoll(channel: number, id: string, expected: number, fields: PollRevision) {
     return this.json<{ queued: boolean }>(`/scheduled/${channel}/replace/${encodeURIComponent(id)}`,

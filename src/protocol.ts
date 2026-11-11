@@ -11,8 +11,9 @@ export interface Issue { task?: number | null; field?: string; message: string }
 export interface Parsed {
   telegram: Record<string, unknown>; tasks: Task[]; errors: Issue[]; warnings: Issue[];
 }
-export interface Schedule {
-  channel_id: number; timezone: string; date: string; start: string;
+interface ScheduleSlot { channel_id: number; timezone: string; date: string; start: string }
+export interface PostInput extends ScheduleSlot { text: string }
+export interface Schedule extends ScheduleSlot {
   interval: number; quiz_delay: number; theme: Theme;
 }
 export interface BatchInput extends Schedule { source_file: string; tasks: Task[] }
@@ -33,6 +34,7 @@ export interface ScheduledEntry extends QueueEntry {
 export interface Queue {
   checked_at: string; messages: ScheduledEntry[];
   published?: QueueEntry[]; refresh_requested?: boolean; replacing?: boolean;
+  post_submissions?: { id: string; text: string; scheduled_at: string; status: string; error: string | null }[];
 }
 
 export function backendUrl(value: string): string {
@@ -120,5 +122,5 @@ export const states: Record<string, string> = {
 };
 
 export function kindName(kind: string) {
-  return kind === "photo" ? "Изображение" : kind === "poll" ? "Викторина" : "Сообщение";
+  return kind === "photo" ? "Изображение" : kind === "poll" ? "Викторина" : kind === "text" ? "Пост" : "Сообщение";
 }
