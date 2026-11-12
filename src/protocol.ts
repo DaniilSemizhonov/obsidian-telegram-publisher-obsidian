@@ -1,12 +1,19 @@
-export const themeNames = { sand: "Песочная", dark: "Тёмная", light: "Светлая", coral: "Коралловая" };
+export const themeNames = {
+  sand: "Песочная", dark: "Тёмная", light: "Светлая", coral: "Коралловая", "minus-error": "Розово-фиолетовая",
+};
 export type Theme = keyof typeof themeNames;
 export interface Channel { id: number; title: string; username: string | null }
-export interface Task {
+interface QuizTask {
   external_id: string; title: string; question: string; options: string[];
   correct_index: number; explanation: string; image: string | null;
   code: { source: string; language: string } | null;
 }
-export type PollRevision = Pick<Task, "question" | "options" | "correct_index" | "explanation">;
+interface ErrorTask {
+  external_id: string; title: string; blocks: (string | { rows: string[][] })[]; image?: never;
+  code: NonNullable<QuizTask["code"]>;
+}
+export type Task = QuizTask | ErrorTask;
+export type PollRevision = Pick<QuizTask, "question" | "options" | "correct_index" | "explanation">;
 export interface Issue { task?: number | null; field?: string; message: string }
 export interface Parsed {
   telegram: Record<string, unknown>; tasks: Task[]; errors: Issue[]; warnings: Issue[];
@@ -16,7 +23,7 @@ export interface PostInput extends ScheduleSlot { text: string }
 export interface Schedule extends ScheduleSlot {
   interval: number; quiz_delay: number; theme: Theme;
 }
-export interface BatchInput extends Schedule { source_file: string; tasks: Task[] }
+export interface BatchInput extends Schedule { source_file: string; tasks: Task[]; caption_above?: boolean }
 export interface Planned {
   task_id: string; position: number; kind: string; scheduled_at: string; image_url: string | null;
 }
@@ -122,5 +129,6 @@ export const states: Record<string, string> = {
 };
 
 export function kindName(kind: string) {
-  return kind === "photo" ? "Изображение" : kind === "poll" ? "Викторина" : kind === "text" ? "Пост" : "Сообщение";
+  return kind === "photo" ? "Изображение" : kind === "poll" ? "Викторина"
+    : kind === "rich" ? "Rich Message" : kind === "text" ? "Пост" : "Сообщение";
 }

@@ -46,8 +46,18 @@
   height: auto;
   margin-block: var(--size-4-2);
 }
-.otp-dialog .otp-card pre {
+.otp-dialog .otp-card pre,
+.otp-dialog .otp-caption {
   white-space: pre-wrap;
+}
+.otp-dialog .otp-table {
+  border-collapse: collapse;
+}
+.otp-dialog .otp-table th,
+.otp-dialog .otp-table td {
+  border: 1px solid var(--background-modifier-border);
+  padding: var(--size-4-1) var(--size-4-2);
+  text-align: start;
 }
 .otp-dialog .otp-muted {
   color: var(--text-muted);

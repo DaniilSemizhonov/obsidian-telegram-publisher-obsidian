@@ -4,8 +4,9 @@ import { attachmentKeys } from "./protocol.ts";
 
 const MAX_IMAGE = 8 * 1024 * 1024;
 
-export async function prepareNote(app: App, file: TFile, api: PublisherApi) {
+export async function prepareNote(app: App, file: TFile, api: PublisherApi, minusError = false) {
   const markdown = await app.vault.read(file);
+  if (minusError) return { markdown, parsed: await api.parse(markdown, {}, true), warnings: [] };
   const attachments: Record<string, string> = Object.create(null);
   const images = new Map<string, TFile>();
   const identifiers = new Map<string, string>();

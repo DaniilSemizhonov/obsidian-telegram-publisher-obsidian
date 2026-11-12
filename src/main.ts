@@ -20,9 +20,12 @@ export default class TelegramPublisher extends Plugin {
     const saved = await this.loadData() as Partial<PluginData> | null;
     this.data = { settings: { ...DEFAULTS, ...saved?.settings }, batches: saved?.batches ?? [] };
     this.addSettingTab(new PublisherSettings(this));
-    this.registerView(QUEUE_VIEW, leaf => new QueueView(leaf, () => this.api(), this.data.settings, () => this.plan()));
+    this.registerView(QUEUE_VIEW, leaf => new QueueView(
+      leaf, () => this.api(), this.data.settings, () => this.plan(), channel => this.plan(true, channel),
+    ));
     this.addRibbonIcon("calendar-clock", "Отложка Telegram", () => void this.queue());
     this.addCommand({ id: "schedule-note", name: "Telegram: Запланировать подборку", callback: () => this.plan() });
+    this.addCommand({ id: "schedule-minus-error", name: "Telegram: Запланировать «Минус ошибка»", callback: () => this.plan(true) });
     this.addCommand({ id: "batch-status", name: "Telegram: Проверить статус публикаций", callback: () => this.status() });
     this.addCommand({ id: "channel-queue", name: "Telegram: Открыть отложку канала", callback: () => this.queue() });
   }
@@ -43,16 +46,16 @@ export default class TelegramPublisher extends Plugin {
     await this.persist();
   }
 
-  private plan() {
+  private plan(minusError = false, channel?: string) {
     const file = this.app.workspace.getActiveFile();
     if (!(file instanceof TFile) || file.extension !== "md") {
-      new Notice("Откройте Markdown-заметку с викторинами.");
+      new Notice(minusError ? "Откройте заметку с разделом «Минус ошибка»." : "Откройте Markdown-заметку с викторинами.");
       return;
     }
     try {
       const api = this.api();
       new PlanningDialog(this.app, file, api, this.data.settings,
-        batch => this.remember(batch, api.base)).open();
+        batch => this.remember(batch, api.base), minusError, channel).open();
     } catch (error) {
       new Notice(errorText(error));
     }

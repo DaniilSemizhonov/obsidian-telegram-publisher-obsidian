@@ -41,8 +41,8 @@ export class PublisherApi {
 
   channels() { return this.json<Channel[]>("/channels"); }
   status() { return this.json<{ status: string }>("/telegram/status"); }
-  parse(markdown: string, attachments: Record<string, string>) {
-    return this.json<Parsed>("/notes/parse", { markdown, attachments });
+  parse(markdown: string, attachments: Record<string, string>, minusError = false) {
+    return this.json<Parsed>("/notes/parse", { markdown, attachments, ...(minusError ? { minus_error: true } : {}) });
   }
   preview(batch: BatchInput, images: boolean) {
     return this.json<Preview>(`/batches/preview?preview_images=${images}`, batch);

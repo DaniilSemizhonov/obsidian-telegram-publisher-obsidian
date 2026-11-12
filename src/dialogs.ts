@@ -59,6 +59,8 @@ export class PlanningDialog extends Modal {
     app: App, private readonly file: TFile, private readonly api: PublisherApi,
     defaults: Defaults,
     remember: (batch: Batch) => Promise<void>,
+    private readonly minusError = false,
+    private readonly preferredChannel?: string,
   ) {
     super(app);
     this.defaults = { ...defaults };
@@ -67,7 +69,7 @@ export class PlanningDialog extends Modal {
 
   onOpen() {
     this.active = true;
-    this.setTitle("Запланировать подборку");
+    this.setTitle(this.minusError ? "Запланировать «Минус ошибка»" : "Запланировать подборку");
     this.contentEl.addClass("otp-dialog");
     void this.load();
   }
@@ -96,7 +98,7 @@ export class PlanningDialog extends Modal {
           : "Worker пока не подтвердил авторизацию Telegram. Проверьте его состояние в Portainer.");
       }
       if (!this.active) return;
-      const { parsed, markdown, warnings } = await prepareNote(this.app, this.file, this.api);
+      const { parsed, markdown, warnings } = await prepareNote(this.app, this.file, this.api, this.minusError);
       if (!this.active) return;
       for (const text of [...warnings, ...parsed.warnings.map(issueText)]) {
         body.createEl("p", { cls: "otp-muted", text });
@@ -118,7 +120,7 @@ export class PlanningDialog extends Modal {
     const channel = labeled(form, "Канал").createEl("select");
     channel.createEl("option", { value: "", text: "Выберите канал" });
     for (const item of channels) channel.createEl("option", { value: String(item.id), text: channelName(item) });
-    const preferred = meta.channel ?? this.defaults.channel;
+    const preferred = this.preferredChannel ?? meta.channel ?? this.defaults.channel;
     const selected = channelFor(channels, preferred);
     channel.value = selected ? String(selected.id) : "";
     if (preferred && !selected) {
@@ -139,14 +141,18 @@ export class PlanningDialog extends Modal {
     const interval = labeled(form, "Интервал, мин").createEl("input", {
       type: "number", value: String(meta.interval ?? this.defaults.interval), attr: { min: "1", step: "1" },
     });
-    const delay = labeled(form, "Задержка после изображения, мин").createEl("input", {
+    const delay = this.minusError ? undefined : labeled(form, "Задержка после изображения, мин").createEl("input", {
       type: "number", value: String(meta.quiz_delay ?? this.defaults.delay), attr: { min: "1", step: "1" },
     });
     const theme = labeled(form, "Тема PNG").createEl("select");
     for (const [value, text] of Object.entries(themeNames)) {
       theme.createEl("option", { value, text });
     }
-    theme.value = typeof meta.theme === "string" ? meta.theme : this.defaults.theme;
+    theme.value = typeof meta.theme === "string" ? meta.theme : this.minusError ? "minus-error" : this.defaults.theme;
+    const caption = !this.minusError && tasks.some(task => task.code || task.image)
+      ? labeled(form, "Подписи к изображениям").createEl("select") : undefined;
+    caption?.createEl("option", { value: "below", text: "Под изображением" });
+    caption?.createEl("option", { value: "above", text: "Над изображением" });
     const controls = this.contentEl.createDiv("otp-controls");
     const result = this.contentEl.createDiv();
     let busy = false;
@@ -163,14 +169,15 @@ export class PlanningDialog extends Modal {
       this.releaseImages();
       const target = channels.find(item => String(item.id) === channel.value);
       if (!target || !date.value || !start.value || !theme.value ||
-        !Number.isInteger(interval.valueAsNumber) || !Number.isInteger(delay.valueAsNumber)) {
+        !Number.isInteger(interval.valueAsNumber) || (delay && !Number.isInteger(delay.valueAsNumber))) {
         failure(result, new Error("Выберите канал и заполните дату, время, интервалы и тему."));
         return;
       }
       const batch: BatchInput = {
         source_file: this.file.path, tasks, channel_id: target.id, timezone: timezone.value.trim(),
         date: date.value, start: start.value, interval: interval.valueAsNumber,
-        quiz_delay: delay.valueAsNumber, theme: theme.value as Theme,
+        quiz_delay: delay?.valueAsNumber ?? 1, theme: theme.value as Theme,
+        ...(caption?.value === "above" ? { caption_above: true } : {}),
       };
       busy = true;
       previewButton.disabled = true;
@@ -191,6 +198,7 @@ export class PlanningDialog extends Modal {
         inputs.forEach(input => { input.disabled = false; });
       }
     }, true);
+    caption?.addEventListener("change", () => { if (channel.value) previewButton.click(); });
     if (channel.value) previewButton.click();
   }
 
@@ -203,15 +211,36 @@ export class PlanningDialog extends Modal {
     const imageJobs: Array<{ path: string; target: HTMLElement }> = [];
     for (const [position, task] of batch.tasks.entries()) {
       const card = parent.createDiv("otp-card");
-      card.createEl("h4", { text: `${position + 1}. ${task.title}` });
       const messages = preview.messages.filter(message => message.position === position);
+      if (!messages.some(message => message.kind === "photo" || message.kind === "rich")) {
+        card.createEl("h4", { text: `${position + 1}. ${task.title}` });
+      }
       for (const message of messages) {
         card.createDiv({ cls: "otp-muted", text: `${time(message.scheduled_at)} · ${kindName(message.kind)}` });
+        if (message.kind !== "photo" && message.kind !== "rich") continue;
+        if (batch.caption_above) card.createEl("p", { text: task.title });
         if (message.image_url) {
           imageJobs.push({ path: message.image_url, target: card.createDiv("otp-image") });
+        } else if (task.code) {
+          card.createEl("pre", { text: task.code.source });
+        }
+        if ("blocks" in task) {
+          for (const block of task.blocks) {
+            if (typeof block === "string") {
+              card.createEl("p", { text: block, cls: "otp-caption" });
+              continue;
+            }
+            const table = card.createEl("table", { cls: "otp-table" });
+            for (const [index, cells] of block.rows.entries()) {
+              const row = table.createEl("tr");
+              for (const text of cells) row.createEl(index === 0 ? "th" : "td", { text });
+            }
+          }
+        } else if (!batch.caption_above) {
+          card.createEl("p", { text: task.title });
         }
       }
-      if (task.code && !messages.some(message => message.image_url)) card.createEl("pre", { text: task.code.source });
+      if ("blocks" in task) continue;
       if (task.question !== task.title) card.createEl("p", { text: task.question });
       const options = card.createEl("ol");
       for (const [index, option] of task.options.entries()) {
@@ -351,6 +380,7 @@ export class QueueView extends ItemView {
   constructor(
     leaf: WorkspaceLeaf, private readonly connect: () => PublisherApi,
     private readonly defaults: Defaults, private readonly planNote: () => void,
+    private readonly planMinusError: (channel: string) => void,
   ) {
     super(leaf);
   }
@@ -404,6 +434,7 @@ export class QueueView extends ItemView {
       }, true);
       newPost.disabled = true;
       action(compose, "Викторины из заметки", this.planNote);
+      action(compose, "Минус ошибка", () => this.planMinusError(select.value));
       const refresh = async (sync = false, background = false) => {
         window.clearTimeout(this.timer);
         const generation = ++this.generation;
@@ -546,7 +577,8 @@ export class QueueView extends ItemView {
           edit.disabled = true;
           try {
             const batch = await this.api.batch(batchId);
-            if (current()) this.editPoll(channel, managedId, task, batch.payload.tasks[position], time, refresh);
+            const quiz = batch.payload.tasks[position];
+            if (current() && quiz && "question" in quiz) this.editPoll(channel, managedId, task, quiz, time, refresh);
           } catch (error) {
             if (current()) failure(card, error);
           } finally {
@@ -556,7 +588,7 @@ export class QueueView extends ItemView {
         edit.disabled = items.some(item => item.delete_requested);
       }
       const remove = action(controls, "Удалить из отложки", async () => {
-        const prompt = task.kind === "text"
+        const prompt = task.kind === "text" || task.kind === "rich"
           ? "Удалить этот пост из отложки канала?"
           : "Удалить сообщения задания из отложки канала вместе с отложенной картинкой?";
         if (!await confirm(this.app, prompt, true) || !current()) return;
