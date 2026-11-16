@@ -19,7 +19,7 @@ export class PublisherApi {
         headers: { Authorization: "Bearer " + this.token },
       });
     } catch {
-      throw new Error("Сервер недоступен. Проверьте адрес, HTTPS или SSH-туннель.");
+      throw new Error("Сервер недоступен. Проверьте интернет и доступность указанного адреса сервера с этого устройства.");
     }
     if (response.status >= 200 && response.status < 300) return response;
     let detail: unknown;

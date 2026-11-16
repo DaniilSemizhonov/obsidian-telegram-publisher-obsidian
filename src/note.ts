@@ -1,5 +1,6 @@
 import { TFile, type App } from "obsidian";
 import { PublisherApi } from "./api.ts";
+import { quizIdentity, recognizeNote } from "./context.ts";
 import { attachmentKeys } from "./protocol.ts";
 
 const MAX_IMAGE = 8 * 1024 * 1024;
@@ -7,6 +8,18 @@ const MAX_IMAGE = 8 * 1024 * 1024;
 export async function prepareNote(app: App, file: TFile, api: PublisherApi, minusError = false) {
   const markdown = await app.vault.read(file);
   if (minusError) return { markdown, parsed: await api.parse(markdown, {}, true), warnings: [] };
+  const recognized = recognizeNote(markdown);
+  if (recognized.quizzes.length) {
+    const tasks = recognized.quizzes.map((quiz, index) => ({
+      ...quiz, external_id: quizIdentity(quiz.question, index), image: null, code: null,
+    }));
+    const frontmatter = app.metadataCache.getFileCache(file)?.frontmatter ?? {};
+    const telegram = { channel: frontmatter.channel, date: String(frontmatter.publish_date ?? ""), ...frontmatter.telegram };
+    if (!telegram.date) delete telegram.date;
+    return { markdown, parsed: { tasks, telegram, errors: [], warnings: [] }, warnings: [
+      `Распознано вопросов: ${tasks.length}. ТЗ, цитаты-подсказки и чеклисты исключены. Проверьте состав ниже.`,
+    ] };
+  }
   const attachments: Record<string, string> = Object.create(null);
   const images = new Map<string, TFile>();
   const identifiers = new Map<string, string>();

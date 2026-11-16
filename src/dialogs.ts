@@ -70,6 +70,7 @@ export class PlanningDialog extends Modal {
   onOpen() {
     this.active = true;
     this.setTitle(this.minusError ? "Запланировать «Минус ошибка»" : "Запланировать подборку");
+    this.modalEl.addClass("otp-modal");
     this.contentEl.addClass("otp-dialog");
     void this.load();
   }
@@ -116,6 +117,39 @@ export class PlanningDialog extends Modal {
   }
 
   private form(channels: Channel[], meta: Record<string, unknown>, tasks: BatchInput["tasks"], markdown: string) {
+    const drafts = this.contentEl.createEl("details");
+    drafts.open = tasks.some(task => "question" in task && (task.question.length > 255 || task.explanation.length > 200));
+    drafts.createEl("summary", { text: `Состав публикации · ${tasks.length} заданий · нажмите, чтобы изменить` });
+    drafts.createEl("p", { text: "Синий — отдельный пост; фиолетовый — викторина; зелёный — пояснение. Изменения здесь действуют только для этой публикации.", cls: "otp-muted" });
+    for (const [index, task] of tasks.entries()) {
+      if (!("question" in task)) continue;
+      const card = drafts.createEl("details", { cls: "otp-card" });
+      card.open = task.question.length > 255 || task.explanation.length > 200 || task.correct_index < 0;
+      card.createEl("summary", { text: `Вопрос ${index + 1} · ${task.question.slice(0, 70)}${task.question.length > 70 ? "…" : ""}` });
+      for (const [key, label, limit, color] of [
+        ["preamble", "Отдельный пост перед вопросом", 4096, "post"],
+        ["question", "Вопрос викторины", 255, "quiz"],
+        ["explanation", "Пояснение к правильному ответу", 200, "explanation"],
+      ] as const) {
+        const field = labeled(card, label);
+        field.addClass(`otp-source-${color}`);
+        const input = field.createEl("textarea", { attr: { rows: key === "preamble" && task.preamble ? "5" : "3" } });
+        input.value = task[key] ?? "";
+        const counter = field.createSpan();
+        const update = () => {
+          task[key] = input.value.trim();
+          if (key === "question") task.title = task.question;
+          counter.setText(`${task[key]?.length ?? 0} / ${limit}`);
+          counter.toggleClass("otp-error", (task[key]?.length ?? 0) > limit);
+        };
+        input.addEventListener("input", update); update();
+      }
+      const options = labeled(card, "Варианты ответов · один на строку").createEl("textarea", { attr: { rows: "4" } });
+      options.value = task.options.join("\n");
+      options.addEventListener("input", () => { task.options = options.value.split("\n").map(value => value.trim()); });
+      const correct = labeled(card, "Номер правильного варианта").createEl("input", { type: "number", value: String(task.correct_index + 1), attr: { min: "1" } });
+      correct.addEventListener("input", () => { task.correct_index = correct.valueAsNumber - 1; });
+    }
     const form = this.contentEl.createDiv("otp-fields");
     const channel = labeled(form, "Канал").createEl("select");
     channel.createEl("option", { value: "", text: "Выберите канал" });
@@ -141,7 +175,7 @@ export class PlanningDialog extends Modal {
     const interval = labeled(form, "Интервал, мин").createEl("input", {
       type: "number", value: String(meta.interval ?? this.defaults.interval), attr: { min: "1", step: "1" },
     });
-    const delay = this.minusError ? undefined : labeled(form, "Задержка после изображения, мин").createEl("input", {
+    const delay = this.minusError ? undefined : labeled(form, "Задержка после условия или изображения, мин").createEl("input", {
       type: "number", value: String(meta.quiz_delay ?? this.defaults.delay), attr: { min: "1", step: "1" },
     });
     const theme = labeled(form, "Тема PNG").createEl("select");
@@ -173,15 +207,26 @@ export class PlanningDialog extends Modal {
         failure(result, new Error("Выберите канал и заполните дату, время, интервалы и тему."));
         return;
       }
+      const problems = tasks.flatMap((task, index) => {
+        if (!("question" in task)) return [];
+        const errors: string[] = [];
+        if (!task.question || task.question.length > 255) errors.push("вопрос должен содержать от 1 до 255 символов");
+        if (!task.explanation || task.explanation.length > 200 || task.explanation.split("\n").length > 3) errors.push("пояснение должно содержать от 1 до 200 символов и не больше трёх строк");
+        if ((task.preamble?.length ?? 0) > 4096) errors.push("отдельный пост длиннее 4096 символов");
+        if (task.options.length < 2 || task.options.length > 12 || task.options.some(option => !option || option.length > 100)) errors.push("нужно от 2 до 12 вариантов, каждый от 1 до 100 символов");
+        if (!Number.isInteger(task.correct_index) || task.correct_index < 0 || task.correct_index >= task.options.length) errors.push("укажите один правильный вариант");
+        return errors.map(error => `Вопрос ${index + 1}: ${error}.`);
+      });
+      if (problems.length) { drafts.open = true; failure(result, new Error(problems.join("\n"))); return; }
       const batch: BatchInput = {
-        source_file: this.file.path, tasks, channel_id: target.id, timezone: timezone.value.trim(),
+        source_file: this.file.path, tasks: structuredClone(tasks), channel_id: target.id, timezone: timezone.value.trim(),
         date: date.value, start: start.value, interval: interval.valueAsNumber,
         quiz_delay: delay?.valueAsNumber ?? 1, theme: theme.value as Theme,
         ...(caption?.value === "above" ? { caption_above: true } : {}),
       };
       busy = true;
       previewButton.disabled = true;
-      const inputs = form.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input, select");
+      const inputs = this.contentEl.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>("input, select, textarea");
       inputs.forEach(input => { input.disabled = true; });
       const loading = result.createEl("p", { text: "Проверяю расписание…" });
       try {
@@ -198,6 +243,10 @@ export class PlanningDialog extends Modal {
         inputs.forEach(input => { input.disabled = false; });
       }
     }, true);
+    drafts.addEventListener("input", () => {
+      result.empty();
+      result.createEl("p", { text: "Состав изменён. Обновите предпросмотр перед отправкой." });
+    });
     caption?.addEventListener("change", () => { if (channel.value) previewButton.click(); });
     if (channel.value) previewButton.click();
   }
@@ -217,6 +266,7 @@ export class PlanningDialog extends Modal {
       }
       for (const message of messages) {
         card.createDiv({ cls: "otp-muted", text: `${time(message.scheduled_at)} · ${kindName(message.kind)}` });
+        if (message.kind === "text" && "question" in task) card.createEl("p", { text: task.preamble, cls: "otp-source-post otp-caption" });
         if (message.kind !== "photo" && message.kind !== "rich") continue;
         if (batch.caption_above) card.createEl("p", { text: task.title });
         if (message.image_url) {
@@ -299,6 +349,7 @@ export class StatusDialog extends Modal {
   onOpen() {
     this.active = true;
     this.setTitle("Статус публикаций");
+    this.modalEl.addClass("otp-modal");
     this.contentEl.addClass("otp-dialog");
     const controls = this.contentEl.createDiv("otp-controls");
     const list = controls.createEl("select", { attr: { "aria-label": "Подборка" } });
@@ -491,6 +542,7 @@ export class QueueView extends ItemView {
       onOpen() {
         this.setTitle("Новый пост");
         const body = this.contentEl;
+        this.modalEl.addClass("otp-modal");
         body.addClass("otp-dialog");
         body.createEl("p", { text: `${channelName(channel)} · ${timezone}`, cls: "otp-muted" });
         const text = labeled(body, "Текст поста").createEl("textarea", { attr: { rows: "7", maxlength: "4096" } });
@@ -616,6 +668,7 @@ export class QueueView extends ItemView {
       onOpen() {
         this.setTitle("Изменить отложенную викторину");
         const body = this.contentEl;
+        this.modalEl.addClass("otp-modal");
         body.addClass("otp-dialog");
         body.createEl("p", { text: `Старый опрос будет удалён, новый запланирован на ${time(message.scheduled_at)}. Картинка останется в расписании. Исходная заметка не изменится.` });
         const question = labeled(body, "Вопрос").createEl("textarea", { attr: { maxlength: "255", rows: "2" } });

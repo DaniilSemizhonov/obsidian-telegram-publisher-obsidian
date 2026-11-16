@@ -4,6 +4,7 @@ export const themeNames = {
 export type Theme = keyof typeof themeNames;
 export interface Channel { id: number; title: string; username: string | null }
 interface QuizTask {
+  preamble?: string;
   external_id: string; title: string; question: string; options: string[];
   correct_index: number; explanation: string; image: string | null;
   code: { source: string; language: string } | null;
@@ -58,6 +59,15 @@ export function backendUrl(value: string): string {
   return url.href.replace(/\/+$/, "");
 }
 
+/** A desktop tunnel is not reachable through the phone's own loopback address. */
+export function connectionUrl(desktop: string, mobile: string, isMobile: boolean): string {
+  const base = backendUrl(isMobile && mobile.trim() ? mobile : desktop);
+  if (isMobile && ["127.0.0.1", "localhost", "[::1]"].includes(new URL(base).hostname)) {
+    throw new Error("На телефоне localhost ведёт на сам телефон. Укажите доступный HTTPS-адрес в настройке «Сервер для телефона».");
+  }
+  return base;
+}
+
 export function attachmentKeys(link: string): string[] {
   const path = link.replace(/\\/g, "/");
   if (!path || /^([a-z][a-z\d+.-]*:|\/)|[?#]/i.test(path)) return [];
@@ -71,7 +81,7 @@ export function attachmentKeys(link: string): string[] {
 
 export function multipartImage(data: ArrayBuffer, extension: string) {
   if (!/^(png|jpe?g|webp)$/i.test(extension)) throw new Error("Поддерживаются PNG, JPEG и WebP.");
-  const boundary = "obsidian-" + crypto.randomUUID();
+  const boundary = "obsidian-" + Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, "0")).join("");
   const encoder = new TextEncoder();
   const header = encoder.encode(
     `--${boundary}\r\nContent-Disposition: form-data; name="image"; filename="image.${extension}"\r\n` +
@@ -115,8 +125,9 @@ export function channelName(channel: Channel): string {
 export function channelFor(channels: Channel[], choice: unknown): Channel | undefined {
   if (typeof choice !== "string" && typeof choice !== "number") return;
   const key = String(choice).trim().toLowerCase();
+  const exact = channels.filter(channel => channel.title.trim().toLowerCase() === key);
   return channels.find(channel => String(channel.id) === key ||
-    (channel.username !== null && "@" + channel.username.toLowerCase() === key));
+    (channel.username !== null && "@" + channel.username.toLowerCase() === key)) ?? (exact.length === 1 ? exact[0] : undefined);
 }
 
 export const states: Record<string, string> = {

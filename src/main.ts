@@ -1,24 +1,38 @@
-import { Notice, Plugin, PluginSettingTab, Setting, TFile } from "obsidian";
+import { Notice, Platform, Plugin, PluginSettingTab, Setting, TFile } from "obsidian";
 import { PublisherApi } from "./api.ts";
 import { PlanningDialog, QueueView, QUEUE_VIEW, StatusDialog, type Defaults, type SavedBatch } from "./dialogs.ts";
-import { backendUrl, errorText, localFields, themeNames, type Batch } from "./protocol.ts";
+import { backendUrl, connectionUrl, errorText, localFields, themeNames, type Batch } from "./protocol.ts";
+
+import { publicationHighlight } from "./highlight.ts";
 
 const SECRET_ID = "obsidian-telegram-publisher-api";
 const DEFAULTS: Settings = {
-  url: "http://127.0.0.1:8000", channel: "", timezone: "Europe/Moscow",
+  url: "http://127.0.0.1:8000", mobileUrl: "", channel: "", timezone: "Europe/Moscow",
   interval: 8, delay: 1, theme: "sand", images: true,
 };
 
-interface Settings extends Defaults { url: string }
+interface Settings extends Defaults { url: string; mobileUrl: string }
 interface PluginData { settings: Settings; batches: SavedBatch[] }
 
 export default class TelegramPublisher extends Plugin {
   data: PluginData = { settings: { ...DEFAULTS }, batches: [] };
+  private lastNote: TFile | null = null;
   private saveQueue: Promise<void> = Promise.resolve();
 
   async onload() {
     const saved = await this.loadData() as Partial<PluginData> | null;
     this.data = { settings: { ...DEFAULTS, ...saved?.settings }, batches: saved?.batches ?? [] };
+    this.lastNote = this.app.workspace.getActiveFile();
+    this.registerEvent(this.app.workspace.on("file-open", file => {
+      if (file?.extension === "md") this.lastNote = file;
+    }));
+    this.registerEvent(this.app.workspace.on("editor-menu", (menu, _editor, view) => {
+      if (!view.file) return;
+      const file = view.file;
+      menu.addItem(item => item.setTitle("Telegram: Запланировать заметку").setIcon("calendar-clock")
+        .onClick(() => this.plan(false, undefined, file)));
+    }));
+    this.registerEditorExtension(publicationHighlight);
     this.addSettingTab(new PublisherSettings(this));
     this.registerView(QUEUE_VIEW, leaf => new QueueView(
       leaf, () => this.api(), this.data.settings, () => this.plan(), channel => this.plan(true, channel),
@@ -31,7 +45,7 @@ export default class TelegramPublisher extends Plugin {
   }
 
   api() {
-    return new PublisherApi(this.data.settings.url, this.app.secretStorage.getSecret(SECRET_ID) ?? "");
+    return new PublisherApi(connectionUrl(this.data.settings.url, this.data.settings.mobileUrl, Platform.isMobile), this.app.secretStorage.getSecret(SECRET_ID) ?? "");
   }
 
   persist() {
@@ -46,8 +60,8 @@ export default class TelegramPublisher extends Plugin {
     await this.persist();
   }
 
-  private plan(minusError = false, channel?: string) {
-    const file = this.app.workspace.getActiveFile();
+  private plan(minusError = false, channel?: string, source?: TFile) {
+    const file = source ?? this.app.workspace.getActiveFile() ?? this.lastNote;
     if (!(file instanceof TFile) || file.extension !== "md") {
       new Notice(minusError ? "Откройте заметку с разделом «Минус ошибка»." : "Откройте Markdown-заметку с викторинами.");
       return;
@@ -79,7 +93,13 @@ export default class TelegramPublisher extends Plugin {
 
   private async queue() {
     try {
-      await this.app.workspace.ensureSideLeaf(QUEUE_VIEW, "right", { active: true });
+      if (Platform.isMobile) {
+        const leaf = this.app.workspace.getLeavesOfType(QUEUE_VIEW)[0] ?? this.app.workspace.getLeaf(true);
+        await leaf.setViewState({ type: QUEUE_VIEW, active: true });
+        await this.app.workspace.revealLeaf(leaf);
+      } else {
+        await this.app.workspace.ensureSideLeaf(QUEUE_VIEW, "right", { active: true });
+      }
     }
     catch (error) { new Notice(errorText(error)); }
   }
@@ -103,10 +123,25 @@ class PublisherSettings extends PluginSettingTab {
         });
       });
 
+    new Setting(root).setName("Сервер для телефона")
+      .setDesc("Доступный с телефона HTTPS-адрес. Если пусто, используется основной адрес. localhost и SSH-туннель компьютера на телефоне не работают.")
+      .addText(text => {
+        text.setPlaceholder("https://publisher.example.com").setValue(settings.mobileUrl);
+        text.inputEl.type = "url";
+        text.inputEl.autocapitalize = "off";
+        text.inputEl.spellcheck = false;
+        text.inputEl.addEventListener("change", () => {
+          try {
+            settings.mobileUrl = text.getValue().trim() ? connectionUrl(text.getValue(), "", true) : "";
+            persist();
+          } catch (error) { new Notice(errorText(error)); text.setValue(settings.mobileUrl); }
+        });
+      });
+
     const tokenSetting = new Setting(root).setName("Токен API");
     const tokenStatus = () => tokenSetting.setDesc(this.app.secretStorage.getSecret(SECRET_ID)
-      ? "Токен сохранён в хранилище секретов Obsidian. Вставьте новый токен для замены."
-      : "Вставьте BACKEND_API_TOKEN из настроек стека в Portainer.");
+      ? "Токен сохранён на этом устройстве. Вставьте новый токен для замены."
+      : "Вставьте BACKEND_API_TOKEN из Portainer. На телефоне токен нужно сохранить отдельно.");
     tokenStatus();
     const tokenInput = tokenSetting.controlEl.createEl("input", {
       type: "password", attr: { autocomplete: "off", placeholder: "Токен API", "aria-label": "Токен API" },

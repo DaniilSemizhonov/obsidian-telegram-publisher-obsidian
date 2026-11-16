@@ -41,3 +41,13 @@ test("default channel matches ID or public handle without selecting another chan
   assert.equal(channelFor(channels, "-1001234567891"), channels[1]);
   assert.equal(channelFor(channels, "@missing"), undefined);
 });
+
+test("mobile connection uses its own HTTPS address and never the desktop tunnel", async () => {
+  const { connectionUrl } = await import("../src/protocol.ts");
+  assert.equal(connectionUrl("http://127.0.0.1:8000", "https://example.com/", true), "https://example.com");
+  assert.equal(connectionUrl("http://127.0.0.1:8000", "https://example.com", false), "http://127.0.0.1:8000");
+  assert.equal(connectionUrl("https://example.com", "", true), "https://example.com");
+  for (const url of ["http://127.0.0.1:8000", "http://localhost:8000", "http://[::1]:8000"]) {
+    assert.throws(() => connectionUrl(url, "", true), /телефон/);
+  }
+});

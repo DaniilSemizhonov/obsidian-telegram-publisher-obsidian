@@ -1,9 +1,9 @@
 {
   "id": "obsidian-telegram-publisher",
   "name": "Telegram Publisher",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "minAppVersion": "1.11.4",
   "description": "Панель отложки Telegram, текстовые посты и викторины из заметок Obsidian.",
   "author": "DaniilSemizhonov",
-  "isDesktopOnly": true
+  "isDesktopOnly": false
 }

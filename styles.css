@@ -70,3 +70,29 @@
   color: var(--text-success);
   font-weight: var(--font-semibold);
 }
+
+/* Shared palette for the note editor and publication review, in light and dark themes. */
+.otp-source-post { border-inline-start: 3px solid var(--color-blue); background: color-mix(in srgb, var(--color-blue) 10%, transparent); }
+.otp-source-quiz { border-inline-start: 3px solid var(--color-purple); background: color-mix(in srgb, var(--color-purple) 10%, transparent); }
+.otp-source-explanation { border-inline-start: 3px solid var(--color-green); background: color-mix(in srgb, var(--color-green) 10%, transparent); }
+.otp-dialog details .otp-field { padding: var(--size-4-2); margin-block: var(--size-4-2); }
+.otp-dialog details summary { cursor: pointer; font-weight: var(--font-semibold); }
+
+.otp-modal { width: min(48rem, 95vw); }
+.otp-dialog, .otp-queue { min-width: 0; overflow-wrap: anywhere; }
+.otp-dialog details textarea { box-sizing: border-box; }
+.otp-dialog .otp-table { display: block; max-width: 100%; overflow-x: auto; }
+.otp-queue .otp-controls > select { min-width: 0; }
+
+@media (max-width: 600px) {
+  .otp-dialog .otp-fields { grid-template-columns: minmax(0, 1fr); }
+  .otp-dialog input, .otp-dialog select, .otp-dialog textarea,
+  .otp-queue select { min-height: 44px; font-size: 16px; max-width: 100%; }
+  .otp-dialog button, .otp-queue button { min-height: 44px; height: auto; white-space: normal; padding-block: 10px; }
+  .otp-dialog .otp-controls, .otp-queue .otp-controls { align-items: stretch; }
+  .otp-dialog .otp-controls > *, .otp-queue .otp-controls > * { flex: 1 1 100%; }
+  .otp-dialog details summary { padding-block: 12px; }
+  .otp-dialog .otp-card { padding: var(--size-4-2); }
+}
+.is-mobile .otp-modal { width: 100%; max-width: 100%; }
+.is-mobile .otp-modal .modal-content { padding-bottom: max(var(--size-4-4), env(safe-area-inset-bottom)); }
