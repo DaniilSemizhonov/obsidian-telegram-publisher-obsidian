@@ -8,22 +8,23 @@ export function recognizeNote(markdown: string) {
   const quizzes: DraftQuiz[] = [];
   let section = "", fenced = false, yaml = lines[0] === "---", current: DraftQuiz | undefined;
   let body: { text: string; line: number }[] = [], explanation = false;
+  let explicitQuestion: string | undefined;
   const posts: string[] = [];
   const finish = () => {
     if (!current) return;
     const paragraphs = body.map(item => item.text).join("\n").trim().split(/\n\s*\n/);
     const questionIndex = paragraphs.map(paragraph => paragraph.includes("?")).lastIndexOf(true);
     const selected = questionIndex >= 0 ? questionIndex : paragraphs.length - 1;
-    current.question = paragraphs[selected]?.trim() ?? "";
+    current.question = explicitQuestion ?? paragraphs[selected]?.trim() ?? "";
     current.title = current.question;
-    current.preamble = paragraphs.filter((_, index) => index !== selected).join("\n\n");
+    current.preamble = paragraphs.filter((_, index) => explicitQuestion !== undefined || index !== selected).join("\n\n");
     const questionStart = body.map(item => item.text).join("\n").lastIndexOf(current.question);
     let offset = 0;
     for (const item of body) {
-      regions.push({ from: item.line, to: item.line, kind: offset >= questionStart && offset < questionStart + current.question.length ? "quiz" : "post" });
+      regions.push({ from: item.line, to: item.line, kind: explicitQuestion === undefined && offset >= questionStart && offset < questionStart + current.question.length ? "quiz" : "post" });
       offset += item.text.length + 1;
     }
-    quizzes.push(current); current = undefined; body = []; explanation = false;
+    quizzes.push(current); current = undefined; body = []; explanation = false; explicitQuestion = undefined;
   };
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -44,6 +45,12 @@ export function recognizeNote(markdown: string) {
       body.push({ text: start[3], line: i }); continue;
     }
     if (current) {
+      const poll = /^(?:\*\*)?Викторина:(?:\*\*)?\s*(.+)$/i.exec(line);
+      if (poll && !current.options.length && !explanation) {
+        explicitQuestion = poll[1].trim();
+        regions.push({ from: i, to: i, kind: "quiz" });
+        continue;
+      }
       const option = /^\s*([а-яa-z])[).]\s+(.+)$/i.exec(line);
       if (option && !explanation) {
         if (option[2].includes("✅")) current.correct_index = current.correct_index === -1 ? current.options.length : -2;

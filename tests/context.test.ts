@@ -46,3 +46,18 @@ test("escaped numbering, topic heading and dotted explanations preserve the actu
   assert.deepEqual(result.quizzes.map(q => q.correct_index), [1, 2, 3, 0, 1]);
   assert.doesNotMatch(JSON.stringify(result.quizzes), /Перед отложкой|Галочки|Голос Мани/);
 });
+
+test("explicit poll heading sends the complete question and condition as a post", () => {
+  for (const marker of ["Викторина:", "**Викторина:**"]) {
+    const source = `# Текст поста\n1. Какое слово закодировали?\n\nК — 00, О — 01, Т — 10, С — 11.\n\nСообщение: 110100\n${marker} Выберите правильный ответ\nа) КОС\nб) СОК ✅\nПояснение: СОК.\n\n2. Второй вопрос?\nа) Да ✅\nб) Нет\nПояснение: Да.`;
+    const { quizzes, regions } = recognizeNote(source);
+    assert.equal(quizzes.length, 2);
+    assert.equal(quizzes[0].question, "Выберите правильный ответ");
+    assert.equal(quizzes[0].preamble, "Какое слово закодировали?\n\nК — 00, О — 01, Т — 10, С — 11.\n\nСообщение: 110100");
+    assert.equal(quizzes[0].correct_index, 1);
+    assert.equal(regions.find(r => r.from === 1)?.kind, "post");
+    assert.equal(regions.find(r => r.from === 6)?.kind, "quiz");
+    assert.equal(quizzes[1].question, "Второй вопрос?");
+    assert.equal(quizzes[1].preamble, "");
+  }
+});
