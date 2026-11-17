@@ -33,3 +33,16 @@ test("mobile quiz identity is stable, distinguishes repeats and needs no SubtleC
   assert.notEqual(quizIdentity("Вопрос?", 0), quizIdentity("Другой?", 0));
   assert.match(quizIdentity("Вопрос?", 0), /^[a-zA-Z0-9_.-]{1,128}$/);
 });
+
+test("escaped numbering, topic heading and dotted explanations preserve the actual question", () => {
+  const note = readFileSync(new URL("./fixtures/decoding.md", import.meta.url), "utf8");
+  const result = recognizeNote(note);
+  assert.equal(result.quizzes.length, 5);
+  assert.equal(result.quizzes[0].question, "Какое слово закодировали?");
+  assert.match(result.quizzes[0].preamble, /110100/);
+  assert.match(result.quizzes[2].question, /Какое слово/);
+  assert.match(result.quizzes[2].preamble, /Л — 0/);
+  assert.ok(result.quizzes.every(q => q.explanation && !q.explanation.includes("**")));
+  assert.deepEqual(result.quizzes.map(q => q.correct_index), [1, 2, 3, 0, 1]);
+  assert.doesNotMatch(JSON.stringify(result.quizzes), /Перед отложкой|Галочки|Голос Мани/);
+});

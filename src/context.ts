@@ -12,13 +12,15 @@ export function recognizeNote(markdown: string) {
   const finish = () => {
     if (!current) return;
     const paragraphs = body.map(item => item.text).join("\n").trim().split(/\n\s*\n/);
-    current.question = paragraphs.pop()?.trim() ?? "";
+    const questionIndex = paragraphs.map(paragraph => paragraph.includes("?")).lastIndexOf(true);
+    const selected = questionIndex >= 0 ? questionIndex : paragraphs.length - 1;
+    current.question = paragraphs[selected]?.trim() ?? "";
     current.title = current.question;
-    current.preamble = paragraphs.join("\n\n");
+    current.preamble = paragraphs.filter((_, index) => index !== selected).join("\n\n");
     const questionStart = body.map(item => item.text).join("\n").lastIndexOf(current.question);
     let offset = 0;
     for (const item of body) {
-      regions.push({ from: item.line, to: item.line, kind: offset < questionStart ? "post" : "quiz" });
+      regions.push({ from: item.line, to: item.line, kind: offset >= questionStart && offset < questionStart + current.question.length ? "quiz" : "post" });
       offset += item.text.length + 1;
     }
     quizzes.push(current); current = undefined; body = []; explanation = false;
@@ -31,11 +33,12 @@ export function recognizeNote(markdown: string) {
     const heading = /^(#{1,6})\s+(.+)$/.exec(line);
     if (heading) {
       finish();
-      if (heading[1].length === 1 || /викторин/i.test(heading[2])) section = heading[2].toLowerCase().trim();
+      if (heading[1].length === 1 || /викторин/i.test(heading[2])) section = /^(перед отложкой|тз|правки|текст поста)/i.test(heading[2]) || /викторин/i.test(heading[2])
+        ? heading[2].toLowerCase().trim() : section;
       continue;
     }
     if (/^\s*>/.test(line)) continue;
-    const start = /^(?:\*\*(\d+)[.)]\*\*|(?:\*\*)?(\d+)[.)](?:\*\*)?)\s+(.+)$/.exec(line);
+    const start = /^(?:\*\*(\d+)\\?[.)]\*\*|(?:\*\*)?(\d+)\\?[.)](?:\*\*)?)\s+(.+)$/.exec(line);
     if (start && /викторин|правки|текст поста/.test(section)) {
       finish(); current = { title: "", question: "", options: [], correct_index: -1, explanation: "", preamble: "" };
       body.push({ text: start[3], line: i }); continue;
@@ -47,7 +50,7 @@ export function recognizeNote(markdown: string) {
         current.options.push(option[2].replace(/✅/g, "").trim());
         regions.push({ from: i, to: i, kind: "quiz" }); continue;
       }
-      const exp = /^(?:\*\*)?Пояснение:(?:\*\*)?\s*(.*)$/i.exec(line);
+      const exp = /^(?:\*\*)?Пояснение[.:](?:\*\*)?\s*(.*)$/i.exec(line);
       if (exp) { explanation = true; current.explanation = exp[1]; }
       else if (explanation) current.explanation += "\n" + line;
       else if (!current.options.length) body.push({ text: line, line: i });
