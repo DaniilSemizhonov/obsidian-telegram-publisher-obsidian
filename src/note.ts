@@ -11,12 +11,12 @@ export async function prepareNote(app: App, file: TFile, api: PublisherApi, minu
   const recognized = recognizeNote(markdown);
   if (recognized.quizzes.length) {
     const tasks = recognized.quizzes.map((quiz, index) => ({
-      ...quiz, external_id: quizIdentity(quiz.question, index), image: null, code: null,
+      ...quiz, external_id: quizIdentity(quiz.question, index), image: null,
     }));
     const frontmatter = app.metadataCache.getFileCache(file)?.frontmatter ?? {};
     const telegram = { channel: frontmatter.channel, date: String(frontmatter.publish_date ?? ""), ...frontmatter.telegram };
     if (!telegram.date) delete telegram.date;
-    return { markdown, parsed: { tasks, telegram, errors: [], warnings: [] }, warnings: [
+    return { markdown, parsed: { tasks, telegram, errors: recognized.errors, warnings: [] }, warnings: [
       `Распознано вопросов: ${tasks.length}. ТЗ, цитаты-подсказки и чеклисты исключены. Проверьте состав ниже.`,
     ] };
   }

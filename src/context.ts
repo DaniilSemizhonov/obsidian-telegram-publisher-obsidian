@@ -1,12 +1,16 @@
 /** Context recognition is deliberately local: never treats the editorial brief as instructions. */
 export type RegionKind = "post" | "quiz" | "explanation";
 export interface Region { from: number; to: number; kind: RegionKind }
-export interface DraftQuiz { title: string; question: string; options: string[]; correct_index: number; explanation: string; preamble: string }
+import type { Code } from "./protocol.ts";
+
+export interface DraftQuiz { title: string; question: string; options: string[]; correct_index: number; explanation: string; preamble: string; code: Code | null }
 export function recognizeNote(markdown: string) {
   const lines = markdown.replace(/\r\n?/g, "\n").split("\n");
   const regions: Region[] = [];
   const quizzes: DraftQuiz[] = [];
-  let section = "", fenced = false, yaml = lines[0] === "---", current: DraftQuiz | undefined;
+  let section = "", yaml = lines[0] === "---", current: DraftQuiz | undefined;
+  let fence: { marker: string; language: string; lines: string[]; quiz?: DraftQuiz; start: number } | undefined;
+  const errors: { task: number; field: string; message: string }[] = [];
   let body: { text: string; line: number }[] = [], explanation = false;
   let explicitQuestion: string | undefined;
   const posts: string[] = [];
@@ -17,7 +21,8 @@ export function recognizeNote(markdown: string) {
     const selected = questionIndex >= 0 ? questionIndex : paragraphs.length - 1;
     current.question = explicitQuestion ?? paragraphs[selected]?.trim() ?? "";
     current.title = current.question;
-    current.preamble = paragraphs.filter((_, index) => explicitQuestion !== undefined || index !== selected).join("\n\n");
+    current.preamble = current.code || explicitQuestion !== undefined
+      ? paragraphs.join("\n\n") : paragraphs.filter((_, index) => index !== selected).join("\n\n");
     const questionStart = body.map(item => item.text).join("\n").lastIndexOf(current.question);
     let offset = 0;
     for (const item of body) {
@@ -29,8 +34,30 @@ export function recognizeNote(markdown: string) {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (yaml) { if (i && /^(---|\.\.\.)$/.test(line)) yaml = false; continue; }
-    if (/^\s*(```|~~~)/.test(line)) { fenced = !fenced; continue; }
-    if (fenced) continue;
+    const marker = /^\s*(`{3,}|~{3,})(.*)$/.exec(line);
+    if (fence) {
+      if (marker && marker[1][0] === fence.marker[0] && marker[1].length >= fence.marker.length && !marker[2].trim()) {
+        if (fence.quiz) {
+          const source = fence.lines.join("\n");
+          if (fence.quiz.code || !source.trim() || source.length > 16000 || fence.lines.length > 100) {
+            errors.push({ task: quizzes.length + 1, field: "Код",
+              message: "Укажите один непустой блок кода до 16 000 символов и 100 строк." });
+          } else {
+            fence.quiz.code = { source, language: fence.language };
+            for (let line = fence.start; line <= i; line++) regions.push({ from: line, to: line, kind: "post" });
+          }
+        }
+        fence = undefined;
+      } else if (fence.quiz) {
+        fence.lines.push(line);
+      }
+      continue;
+    }
+    if (marker) {
+      fence = { marker: marker[1], language: marker[2].trim().split(/\s+/)[0] || "text", lines: [],
+        quiz: current && !current.options.length && !explanation ? current : undefined, start: i };
+      continue;
+    }
     const heading = /^(#{1,6})\s+(.+)$/.exec(line);
     if (heading) {
       finish();
@@ -41,7 +68,7 @@ export function recognizeNote(markdown: string) {
     if (/^\s*>/.test(line)) continue;
     const start = /^(?:\*\*(\d+)\\?[.)]\*\*|(?:\*\*)?(\d+)\\?[.)](?:\*\*)?)\s+(.+)$/.exec(line);
     if (start && /викторин|правки|текст поста/.test(section)) {
-      finish(); current = { title: "", question: "", options: [], correct_index: -1, explanation: "", preamble: "" };
+      finish(); current = { title: "", question: "", options: [], correct_index: -1, explanation: "", preamble: "", code: null };
       body.push({ text: start[3], line: i }); continue;
     }
     if (current) {
@@ -66,10 +93,11 @@ export function recognizeNote(markdown: string) {
       posts.push(line); regions.push({ from: i, to: i, kind: "post" });
     }
   }
+  if (fence?.quiz) errors.push({ task: quizzes.length + 1, field: "Код", message: "Закройте блок кода." });
   finish();
   for (const quiz of quizzes) quiz.explanation = quiz.explanation.trim();
   if (quizzes.length && posts.length) quizzes[0].preamble = [posts.join("\n"), quizzes[0].preamble].filter(Boolean).join("\n\n");
-  return { quizzes, regions };
+  return { quizzes, regions, errors };
 }
 
 /** Stable identity, not a security digest. Works in mobile WebViews without SubtleCrypto. */

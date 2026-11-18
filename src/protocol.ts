@@ -2,12 +2,13 @@ export const themeNames = {
   sand: "Песочная", dark: "Тёмная", light: "Светлая", coral: "Коралловая", "minus-error": "Розово-фиолетовая",
 };
 export type Theme = keyof typeof themeNames;
+export interface Code { source: string; language: string }
 export interface Channel { id: number; title: string; username: string | null }
 interface QuizTask {
   preamble?: string;
   external_id: string; title: string; question: string; options: string[];
   correct_index: number; explanation: string; image: string | null;
-  code: { source: string; language: string } | null;
+  code: Code | null;
 }
 interface ErrorTask {
   external_id: string; title: string; blocks: (string | { rows: string[][] })[]; image?: never;
@@ -24,7 +25,7 @@ export interface PostInput extends ScheduleSlot { text: string }
 export interface Schedule extends ScheduleSlot {
   interval: number; quiz_delay: number; theme: Theme;
 }
-export interface BatchInput extends Schedule { source_file: string; tasks: Task[]; caption_above?: boolean }
+export interface BatchInput extends Schedule { source_file: string; tasks: Task[]; caption_above?: boolean; code_as_image?: boolean }
 export interface Planned {
   task_id: string; position: number; kind: string; scheduled_at: string; image_url: string | null;
 }

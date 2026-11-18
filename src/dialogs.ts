@@ -127,7 +127,7 @@ export class PlanningDialog extends Modal {
       card.open = task.question.length > 255 || task.explanation.length > 200 || task.correct_index < 0;
       card.createEl("summary", { text: `Вопрос ${index + 1} · ${task.question.slice(0, 70)}${task.question.length > 70 ? "…" : ""}` });
       for (const [key, label, limit, color] of [
-        ["preamble", "Отдельный пост перед вопросом", 4096, "post"],
+        ["preamble", task.code ? "Текст перед опросом" : "Отдельный пост перед вопросом", 4096, "post"],
         ["question", "Вопрос викторины", 255, "quiz"],
         ["explanation", "Пояснение к правильному ответу", 200, "explanation"],
       ] as const) {
@@ -137,12 +137,16 @@ export class PlanningDialog extends Modal {
         input.value = task[key] ?? "";
         const counter = field.createSpan();
         const update = () => {
-          task[key] = input.value.trim();
-          if (key === "question") task.title = task.question;
-          counter.setText(`${task[key]?.length ?? 0} / ${limit}`);
-          counter.toggleClass("otp-error", (task[key]?.length ?? 0) > limit);
+          const length = input.value.trim().length;
+          counter.setText(`${length} / ${limit}`);
+          counter.toggleClass("otp-error", length > limit);
         };
-        input.addEventListener("input", update); update();
+        input.addEventListener("input", () => {
+          if (key === "question" && task.title === task.question) task.title = input.value.trim();
+          task[key] = input.value.trim();
+          update();
+        });
+        update();
       }
       const options = labeled(card, "Варианты ответов · один на строку").createEl("textarea", { attr: { rows: "4" } });
       options.value = task.options.join("\n");
@@ -178,15 +182,25 @@ export class PlanningDialog extends Modal {
     const delay = this.minusError ? undefined : labeled(form, "Задержка после условия или изображения, мин").createEl("input", {
       type: "number", value: String(meta.quiz_delay ?? this.defaults.delay), attr: { min: "1", step: "1" },
     });
-    const theme = labeled(form, "Тема PNG").createEl("select");
+    const codeAsImage = tasks.some(task => "question" in task && task.code)
+      ? labeled(form, "Отправить код картинкой").createEl("input", { type: "checkbox" }) : undefined;
+    if (codeAsImage) codeAsImage.checked = true;
+    const themeField = labeled(form, "Тема PNG");
+    const theme = themeField.createEl("select");
     for (const [value, text] of Object.entries(themeNames)) {
       theme.createEl("option", { value, text });
     }
     theme.value = typeof meta.theme === "string" ? meta.theme : this.minusError ? "minus-error" : this.defaults.theme;
-    const caption = !this.minusError && tasks.some(task => task.code || task.image)
-      ? labeled(form, "Подписи к изображениям").createEl("select") : undefined;
+    const captionField = !this.minusError && tasks.some(task => task.code || task.image)
+      ? labeled(form, "Подписи к изображениям") : undefined;
+    const caption = captionField?.createEl("select");
     caption?.createEl("option", { value: "below", text: "Под изображением" });
     caption?.createEl("option", { value: "above", text: "Над изображением" });
+    if (caption && tasks.some(task => "question" in task && task.code && task.preamble)) caption.value = "above";
+    const showMediaFields = () => {
+      themeField.hidden = codeAsImage?.checked === false;
+      if (captionField) captionField.hidden = codeAsImage?.checked === false && !tasks.some(task => task.image);
+    };
     const controls = this.contentEl.createDiv("otp-controls");
     const result = this.contentEl.createDiv();
     let busy = false;
@@ -213,6 +227,12 @@ export class PlanningDialog extends Modal {
         if (!task.question || task.question.length > 255) errors.push("вопрос должен содержать от 1 до 255 символов");
         if (!task.explanation || task.explanation.length > 200 || task.explanation.split("\n").length > 3) errors.push("пояснение должно содержать от 1 до 200 символов и не больше трёх строк");
         if ((task.preamble?.length ?? 0) > 4096) errors.push("отдельный пост длиннее 4096 символов");
+        if (task.code) {
+          const caption = task.preamble || task.title;
+          if (codeAsImage?.checked === false) {
+            if (caption.length + 2 + task.code.source.trimEnd().length > 4096) errors.push("текст вместе с кодом длиннее 4096 символов");
+          } else if (caption.length > 1024) errors.push("подпись к изображению длиннее 1024 символов");
+        }
         if (task.options.length < 2 || task.options.length > 12 || task.options.some(option => !option || option.length > 100)) errors.push("нужно от 2 до 12 вариантов, каждый от 1 до 100 символов");
         if (!Number.isInteger(task.correct_index) || task.correct_index < 0 || task.correct_index >= task.options.length) errors.push("укажите один правильный вариант");
         return errors.map(error => `Вопрос ${index + 1}: ${error}.`);
@@ -222,7 +242,8 @@ export class PlanningDialog extends Modal {
         source_file: this.file.path, tasks: structuredClone(tasks), channel_id: target.id, timezone: timezone.value.trim(),
         date: date.value, start: start.value, interval: interval.valueAsNumber,
         quiz_delay: delay?.valueAsNumber ?? 1, theme: theme.value as Theme,
-        ...(caption?.value === "above" ? { caption_above: true } : {}),
+        ...(caption?.value === "above" && !captionField?.hidden ? { caption_above: true } : {}),
+        ...(codeAsImage?.checked === false ? { code_as_image: false } : {}),
       };
       busy = true;
       previewButton.disabled = true;
@@ -248,6 +269,10 @@ export class PlanningDialog extends Modal {
       result.createEl("p", { text: "Состав изменён. Обновите предпросмотр перед отправкой." });
     });
     caption?.addEventListener("change", () => { if (channel.value) previewButton.click(); });
+    codeAsImage?.addEventListener("change", () => {
+      showMediaFields();
+      if (channel.value) previewButton.click();
+    });
     if (channel.value) previewButton.click();
   }
 
@@ -261,14 +286,18 @@ export class PlanningDialog extends Modal {
     for (const [position, task] of batch.tasks.entries()) {
       const card = parent.createDiv("otp-card");
       const messages = preview.messages.filter(message => message.position === position);
-      if (!messages.some(message => message.kind === "photo" || message.kind === "rich")) {
+      if (!task.code && !messages.some(message => message.kind === "photo" || message.kind === "rich")) {
         card.createEl("h4", { text: `${position + 1}. ${task.title}` });
       }
       for (const message of messages) {
         card.createDiv({ cls: "otp-muted", text: `${time(message.scheduled_at)} · ${kindName(message.kind)}` });
-        if (message.kind === "text" && "question" in task) card.createEl("p", { text: task.preamble, cls: "otp-source-post otp-caption" });
+        if (message.kind === "text" && "question" in task) {
+          card.createEl("p", { text: task.code ? task.preamble || task.title : task.preamble, cls: "otp-source-post otp-caption" });
+          if (task.code) card.createEl("pre").createEl("code", { text: task.code.source.trimEnd() });
+        }
         if (message.kind !== "photo" && message.kind !== "rich") continue;
-        if (batch.caption_above) card.createEl("p", { text: task.title });
+        const caption = "question" in task ? task.preamble || task.title : task.title;
+        if (batch.caption_above) card.createEl("p", { text: caption, cls: "otp-caption" });
         if (message.image_url) {
           imageJobs.push({ path: message.image_url, target: card.createDiv("otp-image") });
         } else if (task.code) {
@@ -287,11 +316,11 @@ export class PlanningDialog extends Modal {
             }
           }
         } else if (!batch.caption_above) {
-          card.createEl("p", { text: task.title });
+          card.createEl("p", { text: caption, cls: "otp-caption" });
         }
       }
       if ("blocks" in task) continue;
-      if (task.question !== task.title) card.createEl("p", { text: task.question });
+      if (task.code || task.question !== task.title) card.createEl("p", { text: task.question });
       const options = card.createEl("ol");
       for (const [index, option] of task.options.entries()) {
         options.createEl("li", { text: index === task.correct_index ? `${option} ✓` : option,

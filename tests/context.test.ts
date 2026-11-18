@@ -61,3 +61,19 @@ test("explicit poll heading sends the complete question and condition as a post"
     assert.equal(quizzes[1].preamble, "");
   }
 });
+
+test("code after a numbered question keeps its language, indentation and surrounding condition", () => {
+  const source = [
+    "# Викторина Задание № 6 ОГЭ", "1\\. Для какой пары программа напечатает YES?", "", "```python",
+    "if s >= 4:", '    print("YES")', "```", "", "Пары: (4, 6), (3, 6).", "",
+    "а) (4, 6) ✅", "б) (3, 6)", "**Пояснение.** Четыре подходит.", "",
+    "2\\. Второй вопрос?", "а) Да ✅", "б) Нет", "Пояснение: Да.",
+  ].join("\n");
+  const { quizzes, errors } = recognizeNote(source);
+  assert.deepEqual(errors, []);
+  assert.deepEqual(quizzes[0].code, { language: "python", source: 'if s >= 4:\n    print("YES")' });
+  assert.equal(quizzes[0].question, "Для какой пары программа напечатает YES?");
+  assert.equal(quizzes[0].preamble, "Для какой пары программа напечатает YES?\n\nПары: (4, 6), (3, 6).");
+  assert.equal(quizzes[1].code, null);
+  assert.equal(quizzes[1].preamble, "");
+});

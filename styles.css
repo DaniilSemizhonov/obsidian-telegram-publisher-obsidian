@@ -17,6 +17,13 @@
 .otp-dialog .otp-field textarea {
   resize: vertical;
 }
+.otp-dialog .otp-field[hidden] {
+  display: none;
+}
+.otp-dialog .otp-field input[type="checkbox"] {
+  align-self: flex-start;
+  width: auto;
+}
 .otp-queue select {
   max-width: 100%;
 }
