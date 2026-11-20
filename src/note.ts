@@ -3,11 +3,20 @@ import { PublisherApi } from "./api.ts";
 import { quizIdentity, recognizeNote } from "./context.ts";
 import { attachmentKeys } from "./protocol.ts";
 
+import { minusErrorNote } from "./minus-error.ts";
+
 const MAX_IMAGE = 8 * 1024 * 1024;
 
 export async function prepareNote(app: App, file: TFile, api: PublisherApi, minusError = false) {
   const markdown = await app.vault.read(file);
-  if (minusError) return { markdown, parsed: await api.parse(markdown, {}, true), warnings: [] };
+  const errorNote = minusErrorNote(markdown);
+  if (minusError || errorNote) {
+    const parsed = await api.parse(errorNote?.markdown ?? markdown, {}, true);
+    const meta = app.metadataCache.getFileCache(file)?.frontmatter;
+    parsed.telegram.channel ??= meta?.channel;
+    parsed.telegram.date ??= meta?.publish_date;
+    return { markdown, parsed, warnings: [] };
+  }
   const recognized = recognizeNote(markdown);
   if (recognized.quizzes.length) {
     const tasks = recognized.quizzes.map((quiz, index) => ({

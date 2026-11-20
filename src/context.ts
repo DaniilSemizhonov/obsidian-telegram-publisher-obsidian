@@ -1,5 +1,5 @@
 /** Context recognition is deliberately local: never treats the editorial brief as instructions. */
-export type RegionKind = "post" | "quiz" | "explanation";
+export type RegionKind = "post" | "quiz" | "explanation" | "condition" | "code" | "answer";
 export interface Region { from: number; to: number; kind: RegionKind }
 import type { Code } from "./protocol.ts";
 

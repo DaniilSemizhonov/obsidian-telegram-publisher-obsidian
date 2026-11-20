@@ -59,7 +59,7 @@ export class PlanningDialog extends Modal {
     app: App, private readonly file: TFile, private readonly api: PublisherApi,
     defaults: Defaults,
     remember: (batch: Batch) => Promise<void>,
-    private readonly minusError = false,
+    private minusError = false,
     private readonly preferredChannel?: string,
   ) {
     super(app);
@@ -108,6 +108,10 @@ export class PlanningDialog extends Modal {
         failure(body, new Error(parsed.errors.map(issueText).join("\n")));
         return;
       }
+      if (parsed.tasks.some(task => "blocks" in task)) {
+        this.minusError = true;
+        this.setTitle("Запланировать «Минус ошибка»");
+      }
       this.form(channels, parsed.telegram, parsed.tasks, markdown);
     } catch (error) {
       if (this.active) failure(body, error);
@@ -120,9 +124,30 @@ export class PlanningDialog extends Modal {
     const drafts = this.contentEl.createEl("details");
     drafts.open = tasks.some(task => "question" in task && (task.question.length > 255 || task.explanation.length > 200));
     drafts.createEl("summary", { text: `Состав публикации · ${tasks.length} заданий · нажмите, чтобы изменить` });
-    drafts.createEl("p", { text: "Синий — отдельный пост; фиолетовый — викторина; зелёный — пояснение. Изменения здесь действуют только для этой публикации.", cls: "otp-muted" });
+    drafts.createEl("p", { text: this.minusError ? "Синий — условие, фиолетовый — код на карточке. Зелёным в заметке отмечены ответы для отдельной публикации." : "Синий — отдельный пост; фиолетовый — викторина; зелёный — пояснение. Изменения здесь действуют только для этой публикации.", cls: "otp-muted" });
     for (const [index, task] of tasks.entries()) {
-      if (!("question" in task)) continue;
+      if ("blocks" in task) {
+        const card = drafts.createEl("details", { cls: "otp-card" });
+        card.createEl("summary", { text: task.title });
+        task.blocks.forEach((block, i) => {
+          if (typeof block !== "string") {
+            const table = card.createEl("table");
+            for (const row of block.rows) {
+              const tr = table.createEl("tr");
+              for (const cell of row) tr.createEl("td", { text: cell });
+            }
+            return;
+          }
+          const input = labeled(card, i === 0 ? "Рубрика" : i === 1 ? "Заголовок в подписи" : "Условие")
+            .createEl("textarea", { cls: "otp-source-condition" });
+          input.value = block;
+          input.addEventListener("input", () => { task.blocks[i] = input.value.trim(); });
+        });
+        const code = labeled(card, "Код на карточке").createEl("textarea", { cls: "otp-source-code", attr: { rows: "8" } });
+        code.value = task.code.source;
+        code.addEventListener("input", () => { task.code.source = code.value; });
+        continue;
+      }
       const card = drafts.createEl("details", { cls: "otp-card" });
       card.open = task.question.length > 255 || task.explanation.length > 200 || task.correct_index < 0;
       card.createEl("summary", { text: `Вопрос ${index + 1} · ${task.question.slice(0, 70)}${task.question.length > 70 ? "…" : ""}` });
